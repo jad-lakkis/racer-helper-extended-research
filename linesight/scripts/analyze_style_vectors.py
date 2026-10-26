@@ -53,7 +53,7 @@ HEATMAP_PANELS = [
     ("b", "braking fraction b", "viridis", (0, 1)),
     ("f", "full-throttle fraction f", "viridis", (0, 1)),
     ("l_apex", "line at apex (+1 = inside edge)", "coolwarm", (-1, 1)),
-    ("s", "steering edges / s", "magma", (0, None)),
+    ("s", "steering speed s (full-lock sweeps / s)", "magma", (0, None)),
     ("v_entry_ratio", "entry speed / peak speed", "viridis", (0.3, 1)),
 ]
 
@@ -203,7 +203,7 @@ DRIVER_PANELS = [
     ("b", "braking fraction b", "viridis", (0, 0.5)),
     ("f", "full-throttle fraction f", "viridis", (0.5, 1)),
     ("l_apex", "line at apex (+1 = inside edge)", "coolwarm", (-0.6, 0.6)),
-    ("s", "steering edges / s", "magma", (0, 8)),
+    ("s", "steering speed s (full-lock sweeps / s)", "magma", (0, 8)),
     ("v_entry_ratio", "entry speed / peak speed", "viridis", (0.4, 1)),
     ("brake_onset_m", "brake onset before corner (m)", "viridis", (0, 120)),
 ]
@@ -308,10 +308,104 @@ def plot_me_vs_groups(groups: dict, wide: pd.DataFrame, fig_dir: Path, track: st
     plt.close(fig)
 
 
-def analyse_drivers(track_dir: Path, fig_dir: Path, track: str, laps: pd.DataFrame, corners: pd.DataFrame, me: list, bands: list):
+def plot_feature_vs_time(laps: pd.DataFrame, fig_dir: Path, track: str, me: list):
+    """Lap-level mean of each style feature against lap time. Every dot is a lap."""
+    feats = [
+        ("mean_b", "braking fraction b"),
+        ("mean_f", "full-throttle fraction f"),
+        ("mean_l_apex", "line at apex (+1 = inside edge)"),
+        ("mean_s", "steering speed s (full-lock sweeps / s)"),
+        ("mean_v_entry_ratio", "entry speed / peak speed"),
+        ("mean_brake_onset_m", "brake onset before corner (m)"),
+    ]
+    t = laps["lap_time_ms"] / 1000
+    fig, axes = plt.subplots(2, 3, figsize=(16, 8))
+    for ax, (col, title) in zip(axes.ravel(), feats):
+        for kind, color in (("digital", "tab:blue"), ("analog", "tab:orange")):
+            m = laps["steer_input"] == kind
+            ax.scatter(t[m], laps.loc[m, col], s=10, alpha=0.45, color=color, label=f"{kind} steering ({m.sum()})")
+        bins = np.arange(np.floor(t.min()), np.ceil(t.max()) + 1, 1.0)
+        mid, med = [], []
+        for lo, hi in zip(bins, bins[1:]):
+            v = laps.loc[(t >= lo) & (t < hi), col]
+            if len(v) >= 5:
+                mid.append((lo + hi) / 2)
+                med.append(v.median())
+        ax.plot(mid, med, color="k", lw=2, label="median per second")
+        for name in me:
+            m = laps["driver"] == name
+            if m.any():
+                ax.scatter(t[m], laps.loc[m, col], marker="*", s=260, color="gold", edgecolor="k", zorder=5, label=name)
+        ax.set_title(title, fontsize=10)
+        ax.set_xlabel("lap time (s)")
+    axes[0, 0].legend(fontsize=7)
+    fig.suptitle(f"{track}: lap-level style features against lap time ({len(laps)} laps, {laps['driver'].nunique()} drivers)")
+    fig.tight_layout()
+    fig.savefig(fig_dir / f"{track}_features_vs_time.png", dpi=130, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_band_profiles(laps: pd.DataFrame, profiles: dict, corners_def: dict, bands: list, fig_dir: Path, track: str, me: list):
+    """Median speed, line and brake probability along the track for each lap-time band, with the 'me' laps on top."""
+    t = laps["lap_time_ms"] / 1000
+    edges = [0] + list(bands) + [1e9]
+    names = [f"{lo:g}-{hi:g}s" if hi < 1e9 else f">{lo:g}s" for lo, hi in zip(edges, edges[1:])]
+    cmap = plt.get_cmap("viridis")
+    fig, axes = plt.subplots(3, 1, figsize=(16, 10), sharex=True, gridspec_kw=dict(height_ratios=[3, 3, 2]))
+    for c in corners_def["corners"]:
+        for ax in axes:
+            ax.axvspan(c["s_start"], c["s_end"], color="0.9", lw=0)
+        axes[0].text(c["s_apex"], 1.0, str(c["idx"]), transform=axes[0].get_xaxis_transform(), ha="center", va="top", fontsize=8)
+    n_groups = len(names)
+    for gi, (lo, hi, name) in enumerate(zip(edges, edges[1:], names)):
+        ids = laps.loc[(t >= lo) & (t < hi), "lap_id"]
+        ps = [profiles[i] for i in ids if i in profiles]
+        if not ps:
+            continue
+        color = cmap(gi / max(n_groups - 1, 1))
+        s = ps[0]["s"]
+        axes[0].plot(s, np.median([p["speed"] for p in ps], axis=0), color=color, lw=1.4, label=f"{name} (n={len(ps)})")
+        axes[1].plot(s, np.median([p["offset"] for p in ps], axis=0), color=color, lw=1.4)
+        axes[2].plot(s, np.convolve(np.mean([p["brake"] for p in ps], axis=0), np.ones(5) / 5, mode="same"), color=color, lw=1.2)
+    for name in me:
+        for i in laps.loc[laps["driver"] == name, "lap_id"]:
+            if i in profiles:
+                p = profiles[i]
+                axes[0].plot(p["s"], p["speed"], color="k", lw=1.2, alpha=0.9, label=name if i == laps.loc[laps["driver"] == name, "lap_id"].iloc[0] else None)
+                axes[1].plot(p["s"], p["offset"], color="k", lw=1.2, alpha=0.9)
+                axes[2].plot(p["s"], np.convolve(p["brake"].astype(float), np.ones(5) / 5, mode="same"), color="k", lw=1.0, alpha=0.7)
+    axes[0].set_ylabel("speed (km/h), median")
+    axes[1].set_ylabel("offset from centerline (m), median")
+    axes[2].set_ylabel("share of laps braking")
+    axes[2].set_xlabel("track distance (m)")
+    axes[0].legend(fontsize=8, ncol=3, loc="lower right")
+    fig.suptitle(f"{track}: how each lap-time band drives the track (black = {', '.join(me)})")
+    fig.tight_layout()
+    fig.savefig(fig_dir / f"{track}_band_profiles.png", dpi=120, bbox_inches="tight")
+    plt.close(fig)
+
+
+def analyse_drivers(track_dir: Path, fig_dir: Path, track: str, laps: pd.DataFrame, corners: pd.DataFrame, me: list, bands: list, cluster: bool):
     wide = driver_matrix(laps, corners)
     info = laps.groupby("driver").agg(n_laps=("lap_id", "count"), best_time_s=("lap_time_ms", lambda x: x.min() / 1000))
     info = info.reindex(wide.index)
+    edges = [0] + list(bands) + [1e9]
+    time_bands = {}
+    for lo, hi in zip(edges, edges[1:]):
+        members = list(info.index[(info["best_time_s"] >= lo) & (info["best_time_s"] < hi)])
+        if members:
+            time_bands[f"{lo:g}-{hi:g}s" if hi < 1e9 else f">{lo:g}s"] = members
+    print("  drivers per best-lap band:", {k: len(v) for k, v in time_bands.items()})
+    if len(wide) < 5:
+        return {}
+    plot_group_corner_profiles(time_bands, wide, fig_dir, track, "time_band", me)
+    mine = [m for m in me if m in wide.index]
+    for m in mine:
+        plot_me_vs_groups(time_bands, wide, fig_dir, track, "time_band", m)
+    info.to_csv(track_dir / "drivers.csv")
+    wide.to_csv(track_dir / "driver_style_vectors.csv")
+    if not cluster:
+        return {}
     if len(wide) < 12:
         print(f"  {len(wide)} drivers: too few to cluster drivers")
         return {}
@@ -319,25 +413,15 @@ def analyse_drivers(track_dir: Path, fig_dir: Path, track: str, laps: pd.DataFra
     info["cluster"] = labels
     print(f"  {len(wide)} drivers -> {k} clusters, silhouette {sil:.2f}\n" + table.to_string(index=False))
     plot_driver_space(info, Z, pca, fig_dir, track, me)
-
     clusters = {f"cluster {c}": list(info.index[info["cluster"] == c]) for c in sorted(info["cluster"].unique())}
     plot_group_corner_profiles(clusters, wide, fig_dir, track, "driver_cluster", me)
-    edges = [0] + list(bands) + [1e9]
-    time_bands = {}
-    for lo, hi in zip(edges, edges[1:]):
-        members = list(info.index[(info["best_time_s"] >= lo) & (info["best_time_s"] < hi)])
-        time_bands[f"{lo:g}-{hi:g}s" if hi < 1e9 else f">{lo:g}s"] = members
-    plot_group_corner_profiles(time_bands, wide, fig_dir, track, "time_band", me)
-    for m in [m for m in me if m in wide.index]:
+    for m in mine:
         plot_me_vs_groups(clusters, wide, fig_dir, track, "driver_cluster", m)
-        plot_me_vs_groups({b: v for b, v in time_bands.items() if v}, wide, fig_dir, track, "time_band", m)
         d = np.linalg.norm(Z - Z[wide.index.get_loc(m)], axis=1)
         nearest = info.assign(distance=d).drop(index=m).nsmallest(5, "distance")
         print(f"  {m}: cluster {info.loc[m, 'cluster']}, closest drivers:\n" + nearest[["best_time_s", "n_laps", "cluster", "distance"]].round(2).to_string())
-
     info = info.join(pd.DataFrame(Z[:, :3], index=info.index, columns=["pc1", "pc2", "pc3"]))
     info.to_csv(track_dir / "drivers.csv")
-    wide.to_csv(track_dir / "driver_style_vectors.csv")
     out = dict(
         silhouette_by_k=table.to_dict("records"),
         chosen_k=int(k),
@@ -356,7 +440,7 @@ def analyse_drivers(track_dir: Path, fig_dir: Path, track: str, laps: pd.DataFra
     return out
 
 
-def analyse_track(track_dir: Path, fig_dir: Path, me: list, bands: list):
+def analyse_track(track_dir: Path, fig_dir: Path, me: list, bands: list, cluster: bool):
     track = track_dir.name
     laps = pd.read_csv(track_dir / "laps.csv")
     corners = pd.read_csv(track_dir / "corners.csv")
@@ -365,11 +449,14 @@ def analyse_track(track_dir: Path, fig_dir: Path, me: list, bands: list):
     print(f"\n== {track}: {len(laps)} laps, {laps['driver'].nunique()} drivers, {len(corners_def['corners'])} corners")
 
     plot_corner_map(track_dir, corners_def, profiles, fig_dir, track)
-    driver_summary = analyse_drivers(track_dir, fig_dir, track, laps, corners, me, bands)
+    analyse_drivers(track_dir, fig_dir, track, laps, corners, me, bands, cluster)
+    if len(laps) >= MIN_LAPS and "steer_input" in laps:
+        plot_feature_vs_time(laps, fig_dir, track, me)
+        plot_band_profiles(laps, profiles, corners_def, bands, fig_dir, track, me)
     order = "lap_time_ms"
     summary = {}
 
-    if len(laps) >= MIN_LAPS:
+    if cluster and len(laps) >= MIN_LAPS:
         z, best = cluster_laps(laps)
         silhouette, k, labels = best
         laps["style_cluster"] = labels
@@ -394,7 +481,7 @@ def analyse_track(track_dir: Path, fig_dir: Path, me: list, bands: list):
         json.dump(summary, open(track_dir / "clusters.json", "w"), indent=2)
         profile_color = "style_cluster"
     else:
-        print(f"  only {len(laps)} laps (< {MIN_LAPS}): no clustering, per-lap style cards only")
+        print(f"  no lap clustering ({len(laps)} laps, clustering {'on' if cluster else 'off'})")
         profile_color = "lap_id"
 
     if len(laps) <= 60:  # per-lap figures stay readable only for a modest number of laps
@@ -407,7 +494,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("style_dir", type=Path)
     ap.add_argument("--me", default="jadlakkisjad", help="comma-separated driver login(s) to compare against the clusters and time bands")
-    ap.add_argument("--bands", default="52,54,56,58,62", help="best-lap band edges in seconds for the time-band comparison")
+    ap.add_argument("--cluster", action="store_true", help="also cluster laps and drivers into style groups (off by default)")
+    ap.add_argument("--bands", default="54,56,58,62", help="best-lap band edges in seconds for the time-band comparison")
     args = ap.parse_args()
     fig_dir = args.style_dir / "figures"
     fig_dir.mkdir(exist_ok=True)
@@ -415,7 +503,7 @@ def main():
     if not tracks:
         sys.exit(f"No <track>/laps.csv under {args.style_dir}; run extract_style_vectors.py first")
     for d in tracks:
-        analyse_track(d, fig_dir, [m for m in args.me.split(",") if m], [float(b) for b in args.bands.split(",")])
+        analyse_track(d, fig_dir, [m for m in args.me.split(",") if m], [float(b) for b in args.bands.split(",")], args.cluster)
     print(f"\nfigures in {fig_dir}")
 
 
