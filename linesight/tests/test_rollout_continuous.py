@@ -239,7 +239,7 @@ def test_continuous_rollout_against_a_fake_game():
     assert floats.shape == (n, config_copy.sac_float_input_dim) == (n, config_copy.float_input_dim + 13) and np.isfinite(floats).all()
     assert list(floats[0, 1:21]) == [1.0, 0.0, 0.0, 0.0] * 5  # before the first decision: straight, full throttle
     for k in (1, 7, 100):
-        thr, brk, steer = results["executed_actions"][k - 1]
+        steer, thr, brk = results["executed_actions"][k - 1]
         assert np.allclose(floats[k, 17:21], [thr, brk, max(0.0, -steer), max(0.0, steer)], atol=1e-6)
     ref = floats[:, -13:]
     assert np.abs(ref[:, :6]).max() < 1.5 and np.abs(ref[:, -1]).max() < 1.0  # line in half-widths, small error: the car follows the centerline
@@ -252,7 +252,10 @@ def test_continuous_rollout_against_a_fake_game():
     tr = rollout_to_transitions(results, score, 0.1, 0.5, 3, 0.995, 10.0)
     assert len(tr["reward_n"]) == n and tr["img"].shape == (n, 1, config_copy.H_downsized, config_copy.W_downsized)
     assert tr["floats"].shape == (n, config_copy.sac_float_input_dim) and np.all(tr["discount_n"][-3:] == 0.0)
-    assert tr["reward_n"][:100].mean() > 0  # driving along the line earns progress reward
+    # driving along the line earns progress reward; the fake car does not drive like the reference driver, so the style cost (first corners) outweighs it
+    plain = rollout_to_transitions(results, score, 0.0, 0.0, 3, 0.995, 10.0)
+    assert plain["reward_n"][:100].mean() > 0 and tr["reward_n"][:100].mean() < plain["reward_n"][:100].mean()
+    assert score.style_total > 20  # a car that ignores the style ranges is charged for it
 
 
 def test_discrete_rollout_still_builds_the_original_state():

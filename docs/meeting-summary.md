@@ -131,9 +131,10 @@ driver's range (taken from their fastest laps). A failure cost marks invalid lap
 `lambda_s <- max(0, lambda_s + eta (mean style cost - B))` and `lambda_f <- max(0, lambda_f + eta (failure rate - epsilon))`.
 
 **Status (honest).** Built and tested offline: the per-corner style code shared by replays and the agent (identical output on all 617 replays), the action adapter with pedal patterns, the plugin message that
-applies a pattern on every tick, the analog steering levels for IQN, and a steering estimate for keyboard replays. Written but not yet run: the SAC networks and update. Not built yet: the style-cost
-and multiplier code, the reference-line inputs, the SAC training loop in the pipeline. Nothing has run in the game yet: the pedal duty-cycle response and the `InputType::Steer` call
-in the plugin have to be checked there.
+applies a pattern on every tick, the analog steering levels for IQN, a steering estimate for keyboard replays, the SAC networks and update (including a toy control task), the style cost / failure cost /
+multiplier code (a human replay played through the agent's 40 ms path reproduces the extractor's numbers), the driver packages with reference-line inputs, and the whole pipeline around the game: the continuous
+rollout, scoring, replay, learner and collector processes, run against a fake game that follows the track. Details in [sac-style-constraint.md](sac-style-constraint.md). **Nothing has run in the real game yet**:
+the pedal duty-cycle response (`scripts/tools/pedal_response_test.py` measures it), the `InputType::Steer` call in the plugin, and whether SAC actually learns to drive with these settings all have to be checked there.
 
 ## 6. To decide at the meeting
 
