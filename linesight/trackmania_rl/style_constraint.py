@@ -22,7 +22,7 @@ Only numpy is needed (plus style_features and action_adapter).
 """
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -39,7 +39,9 @@ from trackmania_rl.style_features import (
     project_on_centerline,
 )
 
-MAPS_DIR = Path(__file__).resolve().parents[1] / "maps"
+LINESIGHT_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = LINESIGHT_DIR.parent
+MAPS_DIR = LINESIGHT_DIR / "maps"
 
 STYLE_METRICS = ("b", "f", "l_entry", "l_apex", "l_exit", "s")
 # The ranges come from a handful of laps and can be very narrow. A violation is measured in units of max(range width, floor), so that a
@@ -53,6 +55,22 @@ MAX_COST_PER_METRIC = 3.0  # no single metric of a single corner can cost more t
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def resolve_centerline(path) -> Path:
+    """A centerline path as written by the extractor (absolute, or relative to linesight/ or to the repository root) -> an existing file."""
+    path = Path(path)
+    for cand in (path, LINESIGHT_DIR / path, REPO_ROOT / path, MAPS_DIR / path.name):
+        if cand.exists():
+            return cand.resolve()
+    raise FileNotFoundError(f"centerline {path} not found (tried it as given, under linesight/, under the repository root and in maps/)")
+
+
+def repo_relative(path: Path) -> str:
+    try:
+        return str(Path(path).resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
 @dataclass
 class DriverStyle:
     """Everything about the target driver that the reward needs: the corners and the range of z in each corner."""
@@ -60,12 +78,44 @@ class DriverStyle:
     name: str
     track: str
     centerline: Centerline
+    centerline_file: str
     corners: List[Corner]
     ranges: Dict[int, Dict[str, Tuple[float, float]]]  # corner idx -> metric -> (lo, hi)
     half_width: float
     approach_m: float = 120.0
-    best_lap_time_ms: Optional[int] = None
-    lap_times_ms: List[int] = field(default_factory=list)
+    lap_times_ms: List[int] = field(default_factory=list)  # the laps the ranges come from
+
+    @property
+    def best_lap_time_ms(self) -> Optional[int]:
+        return int(min(self.lap_times_ms)) if self.lap_times_ms else None
+
+    def to_meta(self) -> dict:
+        """JSON-serialisable description (everything except the centerline points, which are read from centerline_file)."""
+        return dict(
+            name=self.name,
+            track=self.track,
+            centerline_file=self.centerline_file,
+            track_width_m=2 * self.half_width,
+            approach_m=self.approach_m,
+            lap_times_ms=[int(t) for t in self.lap_times_ms],
+            corners=[asdict(c) for c in self.corners],
+            ranges={str(i): {m: [lo, hi] for m, (lo, hi) in d.items()} for i, d in self.ranges.items()},
+        )
+
+    @classmethod
+    def from_meta(cls, meta: dict, centerline_npy: Optional[Path] = None) -> "DriverStyle":
+        cl_path = resolve_centerline(centerline_npy if centerline_npy is not None else meta["centerline_file"])
+        return cls(
+            name=meta["name"],
+            track=meta["track"],
+            centerline=build_centerline(np.load(cl_path)),
+            centerline_file=repo_relative(cl_path),
+            corners=[Corner(**c) for c in meta["corners"]],
+            ranges={int(i): {m: (float(v[0]), float(v[1])) for m, v in d.items() if m in STYLE_METRICS} for i, d in meta["ranges"].items()},
+            half_width=float(meta["track_width_m"]) / 2,
+            approach_m=float(meta.get("approach_m", 120.0)),
+            lap_times_ms=[int(t) for t in meta["lap_times_ms"]],
+        )
 
     @classmethod
     def from_style_vectors(
@@ -78,7 +128,7 @@ class DriverStyle:
     ) -> "DriverStyle":
         """
         Build from the output of scripts/extract_style_vectors.py (style_dir = style_vectors/<track>). The centerline and the road width
-        are the ones it recorded in corners_def.json unless given (the recorded path is looked up in maps/ by file name if it does not exist here).
+        are the ones it recorded in corners_def.json unless given.
         """
         style_dir = Path(style_dir)
         ranges_all = json.load(open(style_dir / "style_ranges.json"))
@@ -86,26 +136,17 @@ class DriverStyle:
             raise KeyError(f"{driver!r} is not in {style_dir / 'style_ranges.json'}; drivers: {sorted(ranges_all)[:10]}...")
         entry = ranges_all[driver]
         defs = json.load(open(style_dir / "corners_def.json"))
-        if centerline_npy is None:
-            centerline_npy = Path(defs["centerline"])
-            if not centerline_npy.exists():
-                centerline_npy = MAPS_DIR / centerline_npy.name
-        if track_width_m is None:
-            track_width_m = float(defs["track_width_m"])
-        corners = [Corner(**c) for c in defs["corners"]]
-        ranges = {int(k): {m: (v["min"], v["max"]) for m, v in d.items() if m in STYLE_METRICS} for k, d in entry["corners"].items()}
-        times = list(entry["lap_times_ms"])
-        return cls(
+        meta = dict(
             name=driver,
             track=defs["track"],
-            centerline=build_centerline(np.load(centerline_npy)),
-            corners=corners,
-            ranges=ranges,
-            half_width=track_width_m / 2,
+            centerline_file=defs["centerline"],
+            track_width_m=float(track_width_m if track_width_m is not None else defs["track_width_m"]),
             approach_m=approach_m,
-            best_lap_time_ms=int(min(times)) if times else None,
-            lap_times_ms=times,
+            lap_times_ms=entry["lap_times_ms"],
+            corners=defs["corners"],
+            ranges={k: {m: [v["min"], v["max"]] for m, v in d.items()} for k, d in entry["corners"].items()},
         )
+        return cls.from_meta(meta, centerline_npy)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -186,15 +227,28 @@ class StyleConstraint:
         sig = LapSignals(t_s=t_s, p=p, e=e, speed_kmh=speed_kmh, brake=fit(brake), accel=fit(accel), u=fit(u), race_time_ms=total_ms)
         return sig, p, e
 
-    def score(self, positions: np.ndarray, speed_kmh: np.ndarray, actions: np.ndarray, finished: bool, race_time_ms: Optional[int] = None) -> LapScore:
+    def score(
+        self,
+        positions: np.ndarray,
+        speed_kmh: np.ndarray,
+        actions: np.ndarray,
+        finished: bool,
+        race_time_ms: Optional[int] = None,
+        reference=None,
+    ) -> LapScore:
+        """
+        reference: the reference lap sampled for this rollout (driver_context.ReferenceLap, anything with offset_at(p_m)); the line term
+        penalises the distance e_t to its line. Without one the distance to the centerline is used.
+        """
         n = len(positions)
         dt = self.spec.decision_ms / 1000.0
         sig, p, e = self.signals(positions, speed_kmh, actions, race_time_ms if finished else None)
         p_mono = np.maximum.accumulate(p)
+        line_error = e - reference.offset_at(p_mono) if reference is not None else e
 
         w = self.weights
         base = np.zeros(n)
-        base[1:] = w.w_progress * np.diff(p_mono) - w.w_line * np.abs(e[1:]) - w.w_time * dt
+        base[1:] = w.w_progress * np.diff(p_mono) - w.w_line * np.abs(line_error[1:]) - w.w_time * dt
 
         d = self.driver
         rows = corner_rows(sig, d.corners, d.half_width, d.approach_m, {})

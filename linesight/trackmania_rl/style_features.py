@@ -114,28 +114,43 @@ def detect_corners(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+class CenterlineTracker:
+    """
+    Sequential projection onto the centerline, one sample at a time: each sample may only advance a bounded distance past the previous
+    one, so sections of the track that pass close to each other cannot be confused. step() returns arc length p and signed
+    lateral offset e (+ = along cl.normal). Call reset() at the start of a lap.
+    """
+
+    def __init__(self, cl: Centerline):
+        self.cl = cl
+        self.ds = float(cl.s[-1] / (len(cl.s) - 1))
+        self.cxz = cl.pts[:, [0, 2]]
+        self.prev = 0
+
+    def reset(self):
+        self.prev = 0
+
+    def step(self, position, speed_ms: float, dt: float):
+        """position: (x, y, z) or any array whose entries 0 and 2 are x and z."""
+        cl, ds, cxz = self.cl, self.ds, self.cxz
+        xz = np.asarray(position, dtype=np.float64)[[0, 2]]
+        reach = int((speed_ms * dt * 3.0 + 25.0) / ds)
+        lo, hi = max(0, self.prev - int(10 / ds)), min(len(cxz), self.prev + reach + 1)
+        d = np.linalg.norm(cxz[lo:hi] - xz, axis=1)
+        k = lo + int(np.argmin(d))
+        rel = xz - cxz[k]
+        self.prev = k
+        return cl.s[k] + float(rel @ cl.tangent[k]), float(rel @ cl.normal[k])
+
+
 def project_on_centerline(positions: np.ndarray, speeds_ms: np.ndarray, cl: Centerline, dt: float = 0.1):
-    """
-    Sequential projection: each sample may only advance a bounded distance past the previous
-    one, so sections of the track that pass close to each other cannot be confused.
-    Returns arc length p and signed lateral offset e (+ = along cl.normal).
-    """
+    """CenterlineTracker over a whole lap. Returns arrays p (arc length) and e (signed lateral offset)."""
+    tracker = CenterlineTracker(cl)
     n = len(positions)
-    ds = float(cl.s[-1] / (len(cl.s) - 1))
-    xz = positions[:, [0, 2]]
-    cxz = cl.pts[:, [0, 2]]
     p = np.zeros(n)
     e = np.zeros(n)
-    prev = 0
     for i in range(n):
-        reach = int((speeds_ms[i] * dt * 3.0 + 25.0) / ds)
-        lo, hi = max(0, prev - int(10 / ds)), min(len(cxz), prev + reach + 1)
-        d = np.linalg.norm(cxz[lo:hi] - xz[i], axis=1)
-        k = lo + int(np.argmin(d))
-        rel = xz[i] - cxz[k]
-        p[i] = cl.s[k] + float(rel @ cl.tangent[k])
-        e[i] = float(rel @ cl.normal[k])
-        prev = k
+        p[i], e[i] = tracker.step(positions[i], speeds_ms[i], dt)
     return p, e
 
 
