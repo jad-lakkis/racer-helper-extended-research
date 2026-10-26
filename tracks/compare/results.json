@@ -16,7 +16,8 @@
   "time_s": 105.23,
   "driver": "HamUB",
   "full_path_km": 7.925566445128597,
-  "replays": 11
+  "replays": 11,
+  "drivers": 5
  },
  {
   "name": "Monza_Italian_GP",
@@ -35,7 +36,8 @@
   "time_s": 113.66,
   "driver": "thats_leclerc",
   "full_path_km": 13.094165030068273,
-  "replays": 7
+  "replays": 7,
+  "drivers": 7
  },
  {
   "name": "Spa_GT14",
@@ -54,7 +56,8 @@
   "time_s": 135.41,
   "driver": "egan314",
   "full_path_km": 9.856643167174756,
-  "replays": 11
+  "replays": 11,
+  "drivers": 5
  },
  {
   "name": "Spa_F1",
@@ -73,7 +76,8 @@
   "time_s": 40.54,
   "driver": "justafrenchrandom",
   "full_path_km": 2.9874595349773436,
-  "replays": 8
+  "replays": 8,
+  "drivers": 7
  },
  {
   "name": "Nurburgring_GP",
@@ -92,7 +96,8 @@
   "time_s": 139.01,
   "driver": "putbico",
   "full_path_km": 10.401718545422362,
-  "replays": 11
+  "replays": 11,
+  "drivers": 9
  },
  {
   "name": "Silverstone",
@@ -111,7 +116,8 @@
   "time_s": 91.01,
   "driver": "lorino",
   "full_path_km": 8.750172288433525,
-  "replays": 13
+  "replays": 13,
+  "drivers": 13
  },
  {
   "name": "Silverstone_Frankys",
@@ -130,7 +136,8 @@
   "time_s": 70.67,
   "driver": "frankyhanky",
   "full_path_km": 5.310549252657291,
-  "replays": 5
+  "replays": 5,
+  "drivers": 5
  },
  {
   "name": "Catalunya_F1_GPs",
@@ -149,7 +156,8 @@
   "time_s": 81.44,
   "driver": "chum_b",
   "full_path_km": 6.182008527889913,
-  "replays": 13
+  "replays": 13,
+  "drivers": 13
  },
  {
   "name": "Interlagos_GP",
@@ -168,7 +176,8 @@
   "time_s": 49.61,
   "driver": "KRONGTEKK_",
   "full_path_km": 4.257407443138278,
-  "replays": 12
+  "replays": 12,
+  "drivers": 3
  },
  {
   "name": "Interlagos_F1",
@@ -187,7 +196,8 @@
   "time_s": 49.68,
   "driver": "volvo",
   "full_path_km": 4.3656085274918395,
-  "replays": 6
+  "replays": 6,
+  "drivers": 6
  },
  {
   "name": "Monaco_GP_Single",
@@ -206,7 +216,8 @@
   "time_s": 48.84,
   "driver": "dignitas/Sabre",
   "full_path_km": 3.103088374811105,
-  "replays": 23
+  "replays": 23,
+  "drivers": 18
  },
  {
   "name": "Super_Monaco_GP",
@@ -225,7 +236,8 @@
   "time_s": 84.45,
   "driver": "cobham",
   "full_path_km": 8.39326646556668,
-  "replays": 23
+  "replays": 23,
+  "drivers": 13
  },
  {
   "name": "Suzuka_ESL",
@@ -244,7 +256,8 @@
   "time_s": 55.87,
   "driver": "Mawi",
   "full_path_km": 3.6141844260187326,
-  "replays": 34
+  "replays": 34,
+  "drivers": 28
  },
  {
   "name": "Suzuka",
@@ -263,7 +276,8 @@
   "time_s": 97.86,
   "driver": "Patcvam",
   "full_path_km": 4.763722809218973,
-  "replays": 8
+  "replays": 8,
+  "drivers": 4
  },
  {
   "name": "Suzuka_F1_Japan",
@@ -282,7 +296,8 @@
   "time_s": 138.27,
   "driver": "schuMiskins",
   "full_path_km": 10.966010611576113,
-  "replays": 7
+  "replays": 7,
+  "drivers": 7
  },
  {
   "name": "Imola_F1",
@@ -301,7 +316,8 @@
   "time_s": 41.98,
   "driver": "paxiuz",
   "full_path_km": 3.1045697798798293,
-  "replays": 4
+  "replays": 4,
+  "drivers": 4
  },
  {
   "name": "Hungaroring_F1",
@@ -320,7 +336,8 @@
   "time_s": 161.33,
   "driver": "lasmenta",
   "full_path_km": 13.39509258113823,
-  "replays": 9
+  "replays": 9,
+  "drivers": 3
  },
  {
   "name": "COTA",
@@ -339,7 +356,8 @@
   "time_s": 145.54,
   "driver": "Brionac",
   "full_path_km": 12.071410249892699,
-  "replays": 9
+  "replays": 9,
+  "drivers": 7
  },
  {
   "name": "Red_Bull_Ring_F1",
@@ -358,7 +376,8 @@
   "time_s": 102.46,
   "driver": "divided",
   "full_path_km": 9.950658827251132,
-  "replays": 5
+  "replays": 5,
+  "drivers": 5
  },
  {
   "name": "Albert_Park",
@@ -377,7 +396,8 @@
   "time_s": 119.07,
   "driver": "GpMC_2006",
   "full_path_km": 8.254646754868354,
-  "replays": 5
+  "replays": 5,
+  "drivers": 4
  },
  {
   "name": "Bahrain_GP",
@@ -396,6 +416,7 @@
   "time_s": 44.37,
   "driver": "SPAR140",
   "full_path_km": 2.876278311487303,
-  "replays": 6
+  "replays": 6,
+  "drivers": 4
  }
 ]
