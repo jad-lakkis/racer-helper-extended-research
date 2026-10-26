@@ -220,6 +220,60 @@ def _reversals_u(u: np.ndarray, deadband: float = 0.1) -> int:
     return int(np.count_nonzero(np.diff(d) != 0)) if len(d) > 1 else 0
 
 
+
+BRAKE_WINDOW_M = 200.0  # how far before a corner entry a brake press still belongs to that corner
+BRAKE_CHAIN_GAP = 40  # samples (0.4 s): presses closer than this are one braking zone
+BRAKE_MIN_SCRUB_KMH = 8.0  # a zone must take off at least this much speed and be at least BRAKE_MIN_LEN_M long
+BRAKE_MIN_LEN_M = 10.0
+
+
+def _brake_zone(brake, p10, v10, c, prev_end, idx_at, peak_v) -> dict:
+    """
+    The braking zone of one corner: among the chains of brake presses between max(entry - BRAKE_WINDOW_M,
+    end of the previous corner) and the apex, the one that takes off the most speed.
+      bz_onset_m    metres before the corner entry where braking starts
+      bz_release_m  metres after the corner entry where braking ends (> 0 means braking into the corner, trail braking)
+      bz_len_m      length of the zone
+      bz_presses    separate presses inside the zone (1 = one clean press, more = pumping)
+      bz_scrub_kmh  speed lost between onset and release
+      bz_onset_speed speed at onset / peak speed of the lap
+    All NaN when the corner is not braked (no chain takes off 8 km/h over 10 m); bz_taps_other counts the other chains.
+    """
+    out = dict(braked=0, bz_onset_m=np.nan, bz_release_m=np.nan, bz_len_m=np.nan, bz_presses=np.nan, bz_scrub_kmh=np.nan, bz_onset_speed=np.nan, bz_taps_other=0.0)
+    lo, hi = idx_at(max(c.s_start - BRAKE_WINDOW_M, prev_end)), idx_at(c.s_apex)
+    seg = brake[lo : hi + 1].astype(np.int8)
+    if not seg.any():
+        return out
+    d = np.diff(np.concatenate([[0], seg, [0]]))
+    starts, ends = np.where(d == 1)[0], np.where(d == -1)[0]  # run i covers samples starts[i]..ends[i]-1
+    chains, first = [], 0
+    for r in range(1, len(starts) + 1):
+        if r == len(starts) or starts[r] - ends[r - 1] >= BRAKE_CHAIN_GAP:
+            chains.append((first, r - 1))
+            first = r
+    best = None
+    for f, l in chains:
+        i_on, i_off = lo + starts[f], lo + ends[l] - 1
+        scrub = float(v10[i_on] - v10[i_off])
+        if best is None or scrub > best[0]:
+            best = (scrub, f, l, i_on, i_off)
+    scrub, f, l, i_on, i_off = best
+    length = float(p10[i_off] - p10[i_on])
+    out["bz_taps_other"] = float(sum(ends[ll] - starts[ff] > 0 for ff, ll in chains) - 1)  # other chains in the window
+    if scrub < BRAKE_MIN_SCRUB_KMH or length < BRAKE_MIN_LEN_M:
+        return out  # a tap, not a braking zone
+    out.update(
+        braked=1,
+        bz_onset_m=float(c.s_start - p10[i_on]),
+        bz_release_m=float(p10[i_off] - c.s_start),
+        bz_len_m=length,
+        bz_presses=float(l - f + 1),
+        bz_scrub_kmh=scrub,
+        bz_onset_speed=float(v10[i_on]) / peak_v,
+    )
+    return out
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # One lap
 # ─────────────────────────────────────────────────────────────────────────────
@@ -269,7 +323,7 @@ def analyse_lap(path: Path, track: str, cl: Centerline, corners: list, half_widt
 
     lap_id = f"{track}_{re.sub(r'[^A-Za-z0-9._-]+', '-', ghost.login)}_{race_time_ms}"  # also a filename
     rows = []
-    for c in corners:
+    for ci, c in enumerate(corners):
         ia, ib, iap = idx_at(c.s_start), idx_at(c.s_end), idx_at(c.s_apex)
         row = dict(lap_id=lap_id, track=track, driver=ghost.login, lap_time_ms=race_time_ms, corner=c.idx)
         if ib - ia < 3:
@@ -305,6 +359,7 @@ def analyse_lap(path: Path, track: str, cl: Centerline, corners: list, half_widt
             row["brake_onset_m"] = float(c.s_start - np.interp(first * PERIOD_MS / 1000.0, t_s, p_strict))
         else:
             row["brake_onset_m"] = 0.0
+        row.update(_brake_zone(brake, p10, v10, c, corners[ci - 1].s_end if ci else 0.0, idx_at, peak_v))
         rows.append(row)
 
     # lap level: z averaged over corners plus the global scalars used as RL conditioning

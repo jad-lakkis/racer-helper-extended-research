@@ -35,42 +35,96 @@ Median of the per-driver means. 374 drivers; the 20 fastest laps (49.5 to 53.5 s
 | 56–58 | 81 | 0.12 | 0.86 | 0.20 | 1.68 | 0.81 | 24.9 |
 | 58–62 | 94 | 0.09 | 0.87 | 0.19 | 2.17 | 0.81 | 21.0 |
 | ≥ 62 | 35 | 0.05 | 0.86 | 0.14 | 2.42 | 0.79 | 14.0 |
-| **jadlakkisjad** (56.34 s) | 1 | 0.14 | 0.82 | 0.23 | **4.19** | 0.84 | **42.1** |
+| **the agent** (`jadlakkisjad`, 56.34 s) | 1 | 0.14 | 0.82 | 0.23 | **4.19** | 0.84 | **42.1** |
 
 Faster drivers brake more, take a tighter line at the apex and steer less. Full-throttle fraction is flat across bands.
 Steering speed and brake onset are where the agent is furthest from drivers of similar time.
 
+## How the style vector is computed
+
+Everything is **per corner and per lap first**, then averaged. The 19 corners are fixed segments of the track centerline
+(`Hockolicious/corners_def.json`), so corner 7 means the same stretch of road for every driver. For each lap and corner
+(`Hockolicious/corners.csv`):
+
+| measure | how |
+|---|---|
+| braking zone | among the brake presses between the end of the previous corner (at most 200 m back) and the apex, the chain of presses (gaps under 0.4 s) that takes off the most speed. It counts as a zone if it removes at least 8 km/h over at least 10 m, otherwise the corner is "not braked" |
+| `bz_onset_m` | metres before the corner entry where the zone starts (negative = braking starts after the entry) |
+| `bz_release_m` | metres after the corner entry where the zone ends (positive = braking into the corner, i.e. trail braking) |
+| `bz_len_m`, `bz_scrub_kmh`, `bz_presses` | zone length, speed taken off, number of separate presses (more than 1 = pumping the brake) |
+| `f` | share of the corner's time with throttle on and brake off |
+| `l_entry / l_apex / l_exit` | lateral offset from the centerline at the corner start / apex / end, divided by half the road width (assumed 32 m), signed so +1 is the inside edge |
+| `s` | steering speed: total change of the steering command (full lock = 1) per second inside the corner |
+| `v_entry_ratio` | speed at the corner entry divided by the lap's peak speed |
+
+Per-corner values for every lap are in `corners.csv`; the per-corner figures below show them. The braking corners on this track are
+3, 7, 9, 10, 11, 12, 15, 17 and 18 (a braking zone in more than half of all laps). Corners 1, 2, 4, 5, 8, 13, 14, 16 and 19 are taken without braking.
+
+A first version used "share of the corner's time spent braking". It missed braking that happens before the corner and could not tell
+a clean brake from pumping, so it was replaced by the braking-zone measures above.
+
+## Does the same driver change style as they get faster?
+
+Yes, we have that data. TMX keeps a driver's improving personal bests, so 102 of the 374 drivers have 2 or more replays at different times
+and dates, and 56 of them improved by at least 0.5 s (the later replay is the faster one in 99 % of cases). The biggest improvers:
+`tokox17` 69.26 s to 58.76 s over 7 replays (2023 to 2025), `thomassims` 64.38 to 55.63 s, `golmdalf` 64.16 to 56.89 s, `harryshaw234` 60.92 to 56.45 s.
+
+**When a driver improves, their style changes in the same direction and by about the same amount as the difference between slower and faster drivers.**
+Per second of lap time gained, in units of the spread of each feature across drivers (`Hockolicious/progress_within_vs_between.csv`):
+
+| feature | same driver, slow to fast (56 drivers) | different drivers, slow to fast (374) |
+|---|--:|--:|
+| brake point (starts further before the corner) | +0.28 | +0.22 |
+| braking zone length | +0.23 | +0.20 |
+| apex line (more inside) | +0.20 | +0.19 |
+| line swing | +0.27 | +0.24 |
+| coasting | −0.16 | −0.24 |
+| steering speed | −0.14 | −0.21 |
+| steering reversals | −0.20 | −0.15 |
+| brake presses | +0.27 | +0.07 |
+
+In both comparisons faster drivers start braking further before the corner entry and brake for longer. Throttle share, brake release point and entry speed barely change in either comparison.
+Braking-press count is the one feature where improving drivers move more than the population does.
+
+![slopes](figures/Hockolicious_progress_slopes.png)
+![trajectories](figures/Hockolicious_progress_trajectories.png)
+
+Per-corner view of one driver, slowest replay at the top and fastest at the bottom, with where the 10.5 s were gained
+(1.5 s on the stretch before corner 11, 1.45 s in corner 18, 0.85 s in corner 17, 0.77 s in corner 11; the other sections 0 to 0.6 s each):
+
+![tokox17](figures/Hockolicious_progress_tokox17.png)
+
+Also `Hockolicious_progress_thomassims.png` and `Hockolicious_progress_golmdalf.png`. Regenerate with
+`python scripts/driver_progress.py ../style_vectors/Hockolicious ../replays/tmnf_exchange/Hockolicious/manifest.csv --drivers tokox17,thomassims`.
+
 ## Driver style groups
 
-`linesight/scripts/cluster_driver_styles.py`. Each driver becomes one compact vector of 9 features (mean over their laps):
-brake share and brake point on the 10 braking corners, throttle share, coasting, apex line, line swing (apex minus entry / exit),
-steering speed, steering reversals, entry speed. These are far more repeatable than single corners: split-half reliability
-(two random halves of the 102 drivers with 2+ laps) is 0.6 to 0.9. Lap time and steering device (pad vs keyboard) explain 40 to 60 %
-of brake point, coasting, line swing and steering speed, so both are regressed out before clustering. Without that, clustering just
-recovers speed tiers (PC1 correlates −0.93 with lap time).
+`linesight/scripts/cluster_driver_styles.py`. Each driver becomes one vector of 13 features (mean over their laps): the six braking-zone
+measures over the 9 braking corners, throttle share, coasting, apex line, line swing, steering speed, steering reversals and entry speed.
+These repeat well: split-half reliability (two random halves of the 102 drivers with 2 or more laps) is 0.6 to 0.9 for all but the brake
+taps (0.58). Lap time and steering device (pad vs keyboard) explain 40 to 60 % of brake point, coasting, line swing and steering speed, so
+both are regressed out before clustering. Without that, clustering just recovers speed tiers.
 
-Models: Gaussian mixtures (1 to 8 components, spherical / diagonal / full covariance, BIC), k-means silhouette against column-shuffled data,
-and a stability check on 80 % subsets.
+Models: Gaussian mixtures (1 to 8 components, three covariance shapes, BIC), k-means silhouette against column-shuffled data, and a stability
+check on 80 % subsets.
 
 | | raw features | skill- and device-adjusted |
 |---|---|---|
-| best BIC | k = 4 | k = 2 |
-| k-means silhouette (k = 2…8) | 0.18 to 0.32, shuffled 95 % ≈ 0.12 | 0.15 to 0.16, shuffled 95 % ≈ 0.09 |
-| stability (ARI) | not computed | 0.71 |
-| clusters differ in mean style? | yes, speed tiers | **no**: largest cluster-mean z is 0.30 (the split is tight core vs wide spread) |
+| best BIC | k = 3 | k = 2 |
+| k-means silhouette, k = 2 | 0.29 (shuffled 95 %: 0.12) | 0.14 (shuffled 95 %: 0.07) |
+| stability (ARI) | not computed | 0.52 |
+| clusters differ in mean style? | yes, speed tiers | **no**: largest cluster-mean z is 0.24 (tight core vs wide spread) |
 
 **Result: once speed and device are removed, there are no distinct style groups among these drivers, only a continuum.**
-It has two main axes (`figures/Hockolicious_style_axes.png`): PC1 (26 %) is brake hard and early and never coast versus coast and lift,
-and PC2 (22 %) is wide entry, deep apex and big line swing versus straight, throttle-heavy lines. The per-driver coordinates,
-the 2-cluster labels and posterior probabilities are in `Hockolicious/driver_style_clusters.csv`, and every number in `Hockolicious/style_clusters.json`.
+The two main axes are in `figures/Hockolicious_style_axes.png`. Per-driver coordinates, the 2-cluster labels and posterior probabilities
+are in `Hockolicious/driver_style_clusters.csv`, and every number in `Hockolicious/style_clusters.json`.
 
 ![style axes](figures/Hockolicious_style_axes.png)
 ![style space](figures/Hockolicious_style_space_adjusted.png)
 ![model selection](figures/Hockolicious_style_model_selection_adjusted.png)
 
-**Where the agent sits.** Relative to human drivers of its speed it is an extreme outlier: steering reversals +8.4 σ, steering speed +5.5 σ,
-brake point +3.4 σ (it brakes about 15 m earlier), entry speed +2.3 σ, line swing +2.0 σ, throttle share −1.8 σ. Its distance to the nearest
-faster human in style space is about 9 to 10, against a typical driver-to-driver distance of a few units.
+**Where the agent sits.** Relative to human drivers of its speed it is an extreme outlier: steering reversals +8.4 σ, brake presses +6.2 σ
+(it pumps the brake), steering speed +5.5 σ, brake point +3.1 σ, entry speed +2.3 σ, line swing +2.0 σ, throttle share −1.8 σ.
 `Hockolicious/style_neighbours_jadlakkisjad.csv` lists the 10 closest faster drivers with their feature differences.
 
 ## Figures
@@ -78,7 +132,7 @@ faster human in style space is about 9 to 10, against a typical driver-to-driver
 **Style features against lap time** (one dot per lap, star = `jadlakkisjad`)
 ![features vs time](figures/Hockolicious_features_vs_time.png)
 
-**Mean style vector per corner for each best-lap band** (bottom row of each panel = `jadlakkisjad`)
+**Mean style vector per corner for each best-lap band** (bottom row of each panel = the agent). Blank = corner not braked.
 ![bands per corner](figures/Hockolicious_time_band_corner_styles.png)
 
 **Band minus the agent per corner** (red = the band has more of it than the agent)

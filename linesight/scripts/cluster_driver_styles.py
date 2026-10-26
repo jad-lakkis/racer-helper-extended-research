@@ -2,7 +2,8 @@
 """
 Group drivers by driving style, using the per-corner style vectors from extract_style_vectors.py.
 
-1. Each driver becomes one compact style vector (mean over their laps, see FEATURES).
+1. Each driver becomes one compact style vector (mean over their laps, see FEATURES). Braking is described by the
+   braking zone of each braking corner: where it starts, where it ends, how long, how much speed it takes off.
 2. Lap time and steering device (pad / wheel vs keyboard) explain a lot of the raw variation, so they are
    regressed out. What is left is style relative to what a driver of that speed would normally do.
    (Clustering the raw vectors mostly recovers speed tiers; --raw does that for reference.)
@@ -42,8 +43,12 @@ warnings.filterwarnings("ignore")
 
 # name -> (description, unit)
 FEATURES = {
-    "brake_share": ("share of braking-corner time spent braking", "fraction"),
-    "brake_onset_m": ("brake point before braking corners", "m"),
+    "brake_onset_m": ("brake point: metres before the corner entry where the main braking zone starts", "m"),
+    "brake_release_m": ("brake release: metres after the corner entry (> 0 = trail braking into the corner)", "m"),
+    "brake_len_m": ("length of the braking zone", "m"),
+    "brake_scrub_kmh": ("speed taken off in the braking zone", "km/h"),
+    "brake_presses": ("separate presses in the zone (1 = one clean press, more = pumping)", "count"),
+    "brake_taps": ("extra short brake events in the approach window", "count"),
     "throttle": ("full-throttle share of corner time", "fraction"),
     "coast": ("share of corner time with neither pedal", "fraction"),
     "apex_inside": ("line at the apex (+1 = inside edge)", "road half-widths"),
@@ -58,19 +63,24 @@ COV_TYPES = ("spherical", "diag", "full")
 
 
 def braking_corners(corners: pd.DataFrame) -> list:
-    """Corners where a typical lap spends time braking in or just before the corner."""
-    m = corners.groupby("corner")[["b", "b_approach"]].median().sum(axis=1)
-    return [int(c) for c in m.index[m > 0.15]]
+    """Corners where most laps have a braking zone (see _brake_zone in extract_style_vectors.py)."""
+    m = corners.groupby("corner")["braked"].mean()
+    return [int(c) for c in m.index[m > 0.5]]
 
 
-def compact_features(laps: pd.DataFrame, corners: pd.DataFrame, brake_corners: list) -> pd.DataFrame:
+def lap_features(laps: pd.DataFrame, corners: pd.DataFrame, brake_corners: list) -> pd.DataFrame:
+    """One row per lap: the FEATURES plus driver, lap time and steering device."""
     c = corners[corners["lap_id"].isin(laps["lap_id"])].copy()
     c["swing"] = c["l_apex"] - (c["l_entry"] + c["l_exit"]) / 2
     br = c[c["corner"].isin(brake_corners)]
     per_lap = pd.DataFrame(
         {
-            "brake_share": br.groupby("lap_id")["b"].mean(),
-            "brake_onset_m": br.groupby("lap_id")["brake_onset_m"].mean(),
+            "brake_onset_m": br.groupby("lap_id")["bz_onset_m"].mean(),
+            "brake_release_m": br.groupby("lap_id")["bz_release_m"].mean(),
+            "brake_len_m": br.groupby("lap_id")["bz_len_m"].mean(),
+            "brake_scrub_kmh": br.groupby("lap_id")["bz_scrub_kmh"].mean(),
+            "brake_presses": br.groupby("lap_id")["bz_presses"].mean(),
+            "brake_taps": br.groupby("lap_id")["bz_taps_other"].mean(),
             "throttle": c.groupby("lap_id")["f"].mean(),
             "coast": c.groupby("lap_id")["coast"].mean(),
             "apex_inside": c.groupby("lap_id")["l_apex"].mean(),
@@ -83,6 +93,12 @@ def compact_features(laps: pd.DataFrame, corners: pd.DataFrame, brake_corners: l
     per_lap = per_lap.join(laps.set_index("lap_id")[["driver", "lap_time_ms", "steer_input"]])
     per_lap["analog"] = (per_lap["steer_input"] == "analog").astype(float)
     per_lap["t"] = per_lap["lap_time_ms"] / 1000
+    return per_lap
+
+
+def compact_features(laps: pd.DataFrame, corners: pd.DataFrame, brake_corners: list) -> pd.DataFrame:
+    """One row per driver: mean of the lap features, plus lap count, best / mean time and share of analog laps."""
+    per_lap = lap_features(laps, corners, brake_corners)
     g = per_lap.groupby("driver")
     out = g[list(FEATURES)].mean()
     out["n_laps"] = g.size()
@@ -110,7 +126,8 @@ def split_half_reliability(laps: pd.DataFrame, corners: pd.DataFrame, brake_corn
             sub.append(compact_features(sl, corners, brake_corners)[list(FEATURES)].rename(index={drv: drv}))
         cols[h] = pd.concat(sub)
     for f in FEATURES:
-        r = np.corrcoef(cols[0][f], cols[1][f])[0, 1]
+        ok = cols[0][f].notna() & cols[1][f].notna()
+        r = np.corrcoef(cols[0][f][ok], cols[1][f][ok])[0, 1]
         out[f] = float(2 * r / (1 + r))
     return out
 

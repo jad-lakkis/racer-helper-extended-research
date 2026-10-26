@@ -130,14 +130,15 @@ def plot_profiles(laps: pd.DataFrame, profiles: dict, corners_def: dict, fig_dir
 # Driver level: one style vector per driver, clustered into groups of drivers
 # ─────────────────────────────────────────────────────────────────────────────
 
-DRIVER_FEATURES = ["b", "f", "l_apex", "s", "v_entry_ratio", "brake_onset_m"]
+DRIVER_FEATURES = ["bz_onset_m", "bz_len_m", "bz_release_m", "f", "l_apex", "s", "v_entry_ratio"]
 DRIVER_PANELS = [
-    ("b", "braking fraction b", "viridis", (0, 0.5)),
+    ("bz_onset_m", "brake point: m before corner entry (negative = after entry; blank = corner not braked)", "viridis", (-20, 80)),
+    ("bz_len_m", "braking zone length (m)", "viridis", (10, 90)),
+    ("bz_release_m", "brake release: m after corner entry (> 0 = trail braking)", "viridis", (-20, 100)),
     ("f", "full-throttle fraction f", "viridis", (0.5, 1)),
     ("l_apex", "line at apex (+1 = inside edge)", "coolwarm", (-0.6, 0.6)),
     ("s", "steering speed s (full-lock sweeps / s)", "magma", (0, 8)),
     ("v_entry_ratio", "entry speed / peak speed", "viridis", (0.4, 1)),
-    ("brake_onset_m", "brake onset before corner (m)", "viridis", (0, 120)),
 ]
 
 
@@ -171,7 +172,7 @@ def plot_group_corner_profiles(groups: dict, wide: pd.DataFrame, fig_dir: Path, 
     axes[-1].set_xticklabels(range(1, n_corners + 1))
     axes[-1].set_xlabel("corner")
     fig.suptitle(f"{track}: mean style vector per {name}")
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, 0.985])
     fig.savefig(fig_dir / f"{track}_{name}_corner_styles.png", dpi=130, bbox_inches="tight")
     plt.close(fig)
 
