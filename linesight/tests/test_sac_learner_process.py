@@ -35,8 +35,13 @@ CONFIG_COPY = LINESIGHT / "config_files" / "config_copy.py"
 existed = CONFIG_COPY.exists()
 CONFIG_COPY.write_text((LINESIGHT / "config_files" / "config.py").read_text() + "\n" + OVERRIDES)
 
+import faulthandler  # noqa: E402
+
 import torch  # noqa: E402
 import torch.multiprocessing as mp  # noqa: E402
+
+torch.set_num_threads(1)  # as in train_sac.py: a forked worker must not inherit a multi-threaded OpenMP pool
+faulthandler.dump_traceback_later(300, exit=True)  # a hang shows where instead of timing out silently
 
 import test_rollout_continuous as fake  # noqa: E402
 from config_files import config_copy  # noqa: E402
