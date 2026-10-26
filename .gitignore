@@ -10,3 +10,6 @@ __pycache__/
 
 # Environment variables
 .env
+
+# Derived per-lap profiles from extract_style_vectors.py (regenerable)
+style_vectors/*/profiles/

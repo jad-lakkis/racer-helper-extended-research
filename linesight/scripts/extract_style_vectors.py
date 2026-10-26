@@ -9,8 +9,8 @@ problem formulation (z = (b, f, l, s)):
   f  fraction of corner time at full throttle (accelerate pressed, brake released)
   l  driven line: lateral offset from the track centerline at corner entry / apex / exit,
      divided by half the track width and signed so that +1 is the inside edge of the corner
-  s  steering speed. TMNF keyboard replays only record digital left/right presses, so this is
-     the number of steering press/release edges per second inside the corner
+  s  steering speed: total variation of the steering command (full-lock sweeps per second) inside
+     the corner. Digital presses count as full-lock jumps, analog pad / wheel input is continuous
 
 plus extra per-corner features (entry / apex / min speed, brake onset before the corner,
 coasting, steering reversals) used by analyze_style_vectors.py.
@@ -28,6 +28,7 @@ Requirements: pip install pygbx scipy pandas numpy
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +40,7 @@ from scipy.ndimage import gaussian_filter1d
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from extract_driver_profile import (  # noqa: E402
     _load_ghost,
+    decode_analog_steer,
     _pos_curvature,
     compute_braking_aggression,
     compute_corner_entry_speed,
@@ -191,13 +193,30 @@ def _timeline(control_entries, name: str, race_start_ms: int, n: int) -> np.ndar
     return state
 
 
-def _edges(x: np.ndarray) -> int:
-    return int(np.count_nonzero(np.diff(x.astype(np.int8)) != 0))
+def _steer_signal(control_entries, race_start_ms: int, n: int):
+    """
+    Steering command u in [-1, 1] on the 10 ms grid, held between events, plus the input type.
+    Replays store steering either as digital SteerLeft/SteerRight presses or as 'Steer' events
+    (analog value for pad / wheel drivers, -1/0/+1 for keyboard drivers on newer replays).
+    The sign convention between the two encodings is not needed: only |u| and its changes are used.
+    """
+    steer = sorted([(e.time - race_start_ms, decode_analog_steer(e)) for e in control_entries if e.event_name == "Steer"])
+    if steer:
+        u, cur, ptr = np.zeros(n), 0.0, 0
+        for i in range(n):
+            while ptr < len(steer) and steer[ptr][0] <= i * PERIOD_MS:
+                cur = steer[ptr][1]
+                ptr += 1
+            u[i] = cur
+        analog = any(min(abs(v), abs(abs(v) - 1.0)) > 0.02 for _, v in steer)
+        return np.clip(u, -1.0, 1.0), "analog" if analog else "digital"
+    left = _timeline(control_entries, "SteerLeft", race_start_ms, n)
+    right = _timeline(control_entries, "SteerRight", race_start_ms, n)
+    return right.astype(float) - left.astype(float), "digital"
 
 
-def _reversals(left: np.ndarray, right: np.ndarray) -> int:
-    d = np.where(left, 1, np.where(right, -1, 0))
-    d = d[d != 0]
+def _reversals_u(u: np.ndarray, deadband: float = 0.1) -> int:
+    d = np.sign(u[np.abs(u) > deadband])
     return int(np.count_nonzero(np.diff(d) != 0)) if len(d) > 1 else 0
 
 
@@ -212,6 +231,8 @@ def analyse_lap(path: Path, track: str, cl: Centerline, corners: list, half_widt
         return None, None, f"{ghost.num_respawns} respawn(s)"
 
     recs = ghost.records[: n_samples + 1]
+    if len(recs) < 20:
+        return None, None, f"only {len(recs)} position records"
     positions = np.array([[r.position.x, r.position.y, r.position.z] for r in recs])
     disp = np.array([r.display_speed for r in recs], dtype=np.float64)  # km/h
     t_s = np.arange(len(recs)) * 0.1
@@ -234,9 +255,7 @@ def analyse_lap(path: Path, track: str, cl: Centerline, corners: list, half_widt
     ce = ghost.control_entries
     brake = _timeline(ce, "Brake", race_start_ms, n10)
     accel = _timeline(ce, "Accelerate", race_start_ms, n10)
-    left = _timeline(ce, "SteerLeft", race_start_ms, n10)
-    right = _timeline(ce, "SteerRight", race_start_ms, n10)
-    steer = left | right
+    u, steer_input = _steer_signal(ce, race_start_ms, n10)
     peak_v = max(float(v10.max()), 1.0)
 
     def t_at(s_pos: float) -> float:
@@ -248,7 +267,7 @@ def analyse_lap(path: Path, track: str, cl: Centerline, corners: list, half_widt
     def e_at(s_pos: float) -> float:
         return float(np.interp(s_pos, p10, e10))
 
-    lap_id = f"{track}_{ghost.login}_{race_time_ms}"
+    lap_id = f"{track}_{re.sub(r'[^A-Za-z0-9._-]+', '-', ghost.login)}_{race_time_ms}"  # also a filename
     rows = []
     for c in corners:
         ia, ib, iap = idx_at(c.s_start), idx_at(c.s_end), idx_at(c.s_apex)
@@ -266,9 +285,9 @@ def analyse_lap(path: Path, track: str, cl: Centerline, corners: list, half_widt
             l_apex=e_at(c.s_apex) * sgn,
             l_exit=e_at(c.s_end) * sgn,
             l_mean=float(e10[sl].mean()) * sgn,
-            s=_edges(left[sl]) / dur + _edges(right[sl]) / dur,
-            steer_frac=float(steer[sl].mean()),
-            steer_reversals=_reversals(left[sl], right[sl]),
+            s=float(np.abs(np.diff(u[ia : ib + 1])).sum()) / dur,
+            steer_frac=float((np.abs(u[sl]) > 0.05).mean()),
+            steer_reversals=_reversals_u(u[sl]),
             coast=float((~accel[sl] & ~brake[sl]).mean()),
             v_entry=float(v10[ia]),
             v_apex=float(v10[iap]),
@@ -300,6 +319,7 @@ def analyse_lap(path: Path, track: str, cl: Centerline, corners: list, half_widt
         driver=ghost.login,
         lap_time_ms=race_time_ms,
         file=path.name,
+        steer_input=steer_input,
         n_corners=int(df["b"].notna().sum()) if "b" in df else 0,
         peak_speed_kmh=peak_v,
         mean_speed_kmh=float(v10.mean()),
@@ -307,6 +327,7 @@ def analyse_lap(path: Path, track: str, cl: Centerline, corners: list, half_widt
         oversteer_understeer_score=ous,
         corner_entry_speed_ratio=corner_ratio,
         mean_abs_offset_m=float(np.abs(e10).mean()),
+        max_abs_offset_m=float(np.abs(e10).max()),
         risk_tolerance_proxy=float(np.clip(np.abs(e10).mean() / 15.0, 0, 1)),
     )
     for k in ("b", "f", "l_entry", "l_apex", "l_exit", "s", "b_approach", "brake_onset_m", "v_entry_ratio", "coast"):
@@ -321,7 +342,7 @@ def analyse_lap(path: Path, track: str, cl: Centerline, corners: list, half_widt
         offset=e10[gi],
         brake=brake[gi],
         accel=accel[gi],
-        steer=np.where(left[gi], 1, np.where(right[gi], -1, 0)).astype(np.int8),
+        steer=u[gi].astype(np.float32),
         x=np.interp(grid, p_strict, positions[: len(p_strict), 0]),
         z=np.interp(grid, p_strict, positions[: len(p_strict), 2]),
     )
@@ -399,14 +420,17 @@ def main():
         (out / "profiles").mkdir(parents=True, exist_ok=True)
         print(f"\n== {name}: {len(corners)} corners on {cl.s[-1]:.0f} m, {len(track_files)} replay(s)")
 
-        lap_rows, corner_rows = [], []
+        lap_rows, corner_rows, skipped = [], [], []
         for f in track_files:
             try:
                 result, profile, why = analyse_lap(f, name, cl, corners, args.track_width / 2, args.approach_m)
             except SystemExit as exc:
                 result, profile, why = None, None, str(exc)
+            except Exception as exc:  # one malformed replay must not stop a batch of hundreds
+                result, profile, why = None, None, f"{type(exc).__name__}: {exc}"
             if result is None:
                 print(f"  skip {f.name}: {why}")
+                skipped.append(dict(file=f.name, reason=why))
                 continue
             lap, rows = result
             lap_rows.append(lap)
@@ -414,6 +438,7 @@ def main():
             np.savez_compressed(out / "profiles" / f"{lap['lap_id']}.npz", **profile)
             print(f"  {f.name}: {lap['driver']} {lap['lap_time_ms'] / 1000:.2f}s")
 
+        pd.DataFrame(skipped, columns=["file", "reason"]).to_csv(out / "skipped.csv", index=False)
         if not lap_rows:
             continue
         laps = pd.DataFrame(lap_rows).drop_duplicates("lap_id").sort_values("lap_time_ms")

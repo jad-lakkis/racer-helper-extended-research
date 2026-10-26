@@ -107,9 +107,29 @@ def _pos_curvature(positions: np.ndarray, disp_speed: np.ndarray,
 # Steer state timeline
 # ─────────────────────────────────────────────────────────────────────────────
 
+def decode_analog_steer(entry) -> float:
+    """
+    'Steer' events store a signed 24-bit value split over the two uint16 fields
+    (flags << 16 | enabled); +-65536 is full lock. Keyboard drivers on newer replays
+    also use this event with the values -65536 / 0 / +65536.
+    """
+    raw = ((entry.flags << 16) | entry.enabled) & 0xFFFFFF
+    return ((raw ^ 0x800000) - 0x800000) / 65536.0
+
+
 def _steer_timeline(control_entries, race_start_ms: int,
                     n: int, period_ms: int) -> np.ndarray:
     result = np.zeros(n, dtype=bool)
+    analog = sorted([(e.time - race_start_ms, abs(decode_analog_steer(e)) > 0.05)
+                     for e in control_entries if e.event_name == "Steer"],
+                    key=lambda x: x[0])
+    if analog:
+        active, ptr = False, 0
+        for i in range(n):
+            while ptr < len(analog) and analog[ptr][0] <= i * period_ms:
+                active = analog[ptr][1]; ptr += 1
+            result[i] = active
+        return result
     for name in ("SteerLeft", "SteerRight"):
         evts = sorted(
             [(e.time - race_start_ms, bool(e.enabled))
