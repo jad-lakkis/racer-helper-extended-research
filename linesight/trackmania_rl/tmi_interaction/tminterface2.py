@@ -43,6 +43,7 @@ class MessageType(IntEnum):
     C_IS_IN_MENUS = auto()
     C_GET_INPUTS = auto()
     C_SET_INPUT_STATE_ANALOG = auto()
+    C_SET_INPUT_STATE_PATTERN = auto()
 
 
 class TMInterface:
@@ -107,6 +108,15 @@ class TMInterface:
             return
         self.sock.sendall(
             struct.pack("iBBBB", MessageType.C_SET_INPUT_STATE, np.uint8(left), np.uint8(right), np.uint8(accelerate), np.uint8(brake))
+        )
+
+    def set_input_pattern(self, steer_int: int, ticks: int, throttle_mask: int, brake_mask: int):
+        """
+        Inputs for the next `ticks` physics ticks (10 ms each): steering as an integer in [-65536, 65536] held for all of them, and one bit
+        per tick for the throttle and for the brake (bit i = pedal down on tick i). The plugin plays the pattern tick by tick.
+        """
+        self.sock.sendall(
+            struct.pack("=iiiii", MessageType.C_SET_INPUT_STATE_PATTERN, np.int32(steer_int), np.int32(ticks), np.int32(throttle_mask), np.int32(brake_mask))
         )
 
     def give_up(self):

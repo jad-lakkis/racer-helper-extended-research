@@ -26,6 +26,7 @@ enum MessageType {
     CIsInMenus = 22,
     CGetInputs = 23,
     CSetInputStateAnalog = 24,
+    CSetInputStatePattern = 25,
 }
 
 const bool debug = false;
@@ -37,6 +38,22 @@ int next_frame_requested_W = -1;
 int on_step_period = 10;
 bool on_connect_queued = false;
 auto@ simManager = GetSimulationManager();
+
+// Input pattern for the ticks of one decision (see CSetInputStatePattern): the pedals are played tick by tick.
+bool pattern_active = false;
+int pattern_start_time = 0;
+int pattern_ticks = 0;
+int pattern_throttle_mask = 0;
+int pattern_brake_mask = 0;
+int pattern_steer = 0;
+
+void ApplyPatternTick(SimulationManager@ simManager, int tick) {
+    simManager.SetInputState(InputType::Left, 0);
+    simManager.SetInputState(InputType::Right, 0);
+    simManager.SetInputState(InputType::Steer, pattern_steer);
+    simManager.SetInputState(InputType::Up, ((pattern_throttle_mask >> tick) & 1) == 1 ? 1 : 0);
+    simManager.SetInputState(InputType::Down, ((pattern_brake_mask >> tick) & 1) == 1 ? 1 : 0);
+}
 
 void Init_Socket(){
     if (@sock is null) {
@@ -111,6 +128,7 @@ int HandleMessage()
         }
 
         case MessageType::CSetInputStateAnalog: {
+            pattern_active = false;
             // accelerate, brake, then steering as an integer in [-65536, 65536] (negative = left)
             const bool accelerate = clientSock.ReadUint8()>0;
             const bool brake = clientSock.ReadUint8()>0;
@@ -126,6 +144,27 @@ int HandleMessage()
                 simManager.SetInputState(InputType::Steer, steer);
                 simManager.SetInputState(InputType::Up, accelerate?1:0);
                 simManager.SetInputState(InputType::Down, brake?1:0);
+            }
+
+            break;
+        }
+
+        case MessageType::CSetInputStatePattern: {
+            // steering (integer in [-65536, 65536]), number of ticks, then one bit per tick for the throttle and for the brake.
+            // The pattern starts now: tick 0 is applied here, the next ticks in OnRunStep.
+            pattern_steer = clientSock.ReadInt32();
+            pattern_ticks = clientSock.ReadInt32();
+            pattern_throttle_mask = clientSock.ReadInt32();
+            pattern_brake_mask = clientSock.ReadInt32();
+
+            if(debug){
+                print("Set input pattern: steer " + pattern_steer + " ticks " + pattern_ticks + " throttle " + pattern_throttle_mask + " brake " + pattern_brake_mask);
+            }
+
+            if (simManager.InRace) {
+                pattern_start_time = simManager.RaceTime;
+                pattern_active = true;
+                ApplyPatternTick(simManager, 0);
             }
 
             break;
@@ -187,6 +226,7 @@ int HandleMessage()
             if(debug){
                 print("Server: Set input state message");
             }
+            pattern_active = false;
             const bool left = clientSock.ReadUint8()>0;
             const bool right = clientSock.ReadUint8()>0;
             const bool accelerate = clientSock.ReadUint8()>0;
@@ -299,6 +339,13 @@ void OnRunStep(SimulationManager@ simManager){
     }
     if(debug){
         print("Server: OnRunStep " + simManager.RaceTime);
+    }
+
+    if (pattern_active && simManager.InRace) {
+        const int tick = (simManager.RaceTime - pattern_start_time) / 10;
+        if (tick > 0 && tick < pattern_ticks) {
+            ApplyPatternTick(simManager, tick);
+        }
     }
 
     if(simManager.RaceTime%on_step_period==0 || simManager.TickTime>simManager.RaceTime){
