@@ -1,7 +1,7 @@
 track,tmnf_track_id,real_circuit_id,drivers,replays,tmnf_size_vs_real_scale_factor,rms_gap_m,rms_gap_pct_of_lap,corners_tmnf,corners_real,first_lap_closed,fastest_replay_s
 Interlagos_GP,12851169,br-1940,3,12,1.007,15.1,0.35,11,14,True,49.61
-Catalunya_F1_GPs,1482521,es-1991,13,13,1.5,72.3,1.55,14,13,True,81.44
-Spa_GT14,7942362,be-1925,5,11,2.008,127.4,1.82,14,17,True,135.41
+Spa_GT14,7942362,be-1925,5,11,2.061,107.2,1.53,17,17,True,132.87
+Catalunya_F1_GPs,1482521,es-1991,13,13,1.508,73.3,1.57,14,13,True,45.11
 Hungaroring_F1,6671637,hu-1986,3,9,1.099,86.3,1.97,14,14,True,161.33
 Albert_Park,2906878,au-1953,4,5,1.923,106.6,2.02,16,17,True,119.07
 Monza_GP,5169102,it-1922,5,11,2.157,126.0,2.17,10,10,True,105.23

@@ -1,0 +1,5 @@
+driver,lap_time_s,steering,braked_corners,b,f,l_apex,s,bz_onset_m,v_entry_ratio,brake_len_m
+waldfee,44.7,digital,7,0.083,0.808,-0.016,1.735,-20.31,0.712,22.7
+Cybernetic,45.1,analog,6,0.176,0.774,-0.012,1.743,-9.796,0.667,50.4
+Zer0e,46.9,analog,1,0.017,0.78,-0.125,1.08,,0.68,
+Mansemus,48.7,digital,6,0.091,0.742,-0.195,2.481,-49.114,0.705,20.5

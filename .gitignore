@@ -17,3 +17,6 @@ style_vectors/*/profiles/
 # .NET build output
 **/bin/
 **/obj/
+
+# Large replay files (20 MB each); download with linesight/scripts/tools/fetch_tmx_replays.py or see docs/meeting-summary.md
+replays/tmnf_exchange/Interlagos_GP/*.Replay.Gbx

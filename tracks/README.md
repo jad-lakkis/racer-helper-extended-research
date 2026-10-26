@@ -22,14 +22,14 @@ and numbers the corners on both in lap order. `compare/overview.png` shows all 2
 | rank by shape | TMNF track | drivers (replays) | size vs real | shape gap | corners found (TMNF / real) | in Assetto Corsa (from memory) |
 |--:|---|--:|--:|--:|--:|---|
 | 1 | InterlagosGP [Unlimiter 2.0] (12851169) | **3** (12) | 1.01 (same size) | 0.35 % (15 m) | 11 / 14 | mod only |
-| 2 | F1 GPs: Catalunya (1482521) | 13 (13) | 1.50 (two thirds of real) | 1.6 % (72 m) | 14 / 13 | Barcelona is DLC |
+| 2 | F1 GPs: Catalunya (1482521) | 13 (13) | 1.51 (two thirds of real) | 1.6 % (72 m) | 14 / 13 | Barcelona is DLC |
 | 3 | Monza GP (5169102) | 5 (11) | 2.16 (less than half size) | 2.2 % (126 m) | 10 / 10 | official |
 
 **Replays are not drivers.** TMX keeps every improving personal best of a driver, so InterlagosGP's 12 replays are 10 successive laps of one driver
 (KRONGTEKK_, 53.16 s down to 49.61 s on one day) and 2 other drivers. The site's replay page shows only the 3 current records. The driver counts
 above are the ones to use. By drivers, Monaco GP Single has 18 (1.14x, 2.9 % gap) and Catalunya 13.
 
-Next best: GT14_Spa_Francorchamps (11 replays, 2.0x, 1.8 %, official AC), F1 Hungaroring (9 replays, 1.10x, 2.0 %, but the layout is visibly
+Next best: GT14_Spa_Francorchamps (5 drivers, 2.06x, 1.5 %, official AC), F1 Hungaroring (9 replays, 1.10x, 2.0 %, but the layout is visibly
 stretched), Monaco GP Single (23 replays, 1.14x, 2.9 %, loose shape).
 
 How to read it: "size vs real" is the factor that scales the TMNF lap up to the real size (1.00 = a 1:1 recreation); "shape gap" is the RMS

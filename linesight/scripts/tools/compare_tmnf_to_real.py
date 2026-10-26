@@ -62,8 +62,8 @@ def first_lap(P: np.ndarray, speeds_ms: np.ndarray):
 
 
 def tmnf_loop(track_id: int):
-    rep = requests.get(f"{TMX}/api/replays", params=dict(trackId=track_id, count=5, fields="ReplayId,ReplayTime,ReplayRespawns,User.Name"), timeout=30).json()["Results"]
-    rep = [r for r in rep if r["ReplayRespawns"] == 0][0]
+    rep = requests.get(f"{TMX}/api/replays", params=dict(trackId=track_id, count=1000, fields="ReplayId,ReplayTime,ReplayRespawns,User.Name"), timeout=60).json()["Results"]
+    rep = min((r for r in rep if r["ReplayRespawns"] == 0), key=lambda r: r["ReplayTime"])  # the fastest replay (the API list is not sorted by time)
     blob = requests.get(f"{TMX}/recordgbx/{rep['ReplayId']}", timeout=60).content
     f = tempfile.NamedTemporaryFile(suffix=".Replay.Gbx", delete=False)
     f.write(blob)

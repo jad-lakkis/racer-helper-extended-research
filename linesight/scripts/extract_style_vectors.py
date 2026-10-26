@@ -115,8 +115,23 @@ def _steer_signal(control_entries, race_start_ms: int, n: int):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def analyse_lap(path: Path, track: str, cl: Centerline, corners: list, half_width: float, approach_m: float):
+def first_lap_end(P_xz: np.ndarray, leave_m: float = 150.0, return_m: float = 40.0):
+    """Index of the first return to the start after having left it (the end of the first lap of a multi-lap replay), or None."""
+    d = np.linalg.norm(P_xz - P_xz[0], axis=1)
+    if not (d > leave_m).any():
+        return None
+    left = int(np.argmax(d > leave_m))
+    back = np.where(d[left:] < return_m)[0]
+    return left + int(back[0]) if len(back) else None
+
+
+def analyse_lap(path: Path, track: str, cl: Centerline, corners: list, half_width: float, approach_m: float, first_lap: bool = False):
     ghost, race_start_ms, race_time_ms, n_samples = _load_ghost(str(path))
+    if first_lap:  # multi-lap replays: keep the first lap, timed from the geometry (to about +-0.3 s)
+        P_all = np.array([[r.position.x, r.position.z] for r in ghost.records[: n_samples + 1]])
+        end = first_lap_end(P_all)
+        if end is not None:
+            n_samples, race_time_ms = end, end * 100
     if ghost.num_respawns:
         return None, None, f"{ghost.num_respawns} respawn(s)"
 
@@ -233,6 +248,7 @@ def main():
     ap.add_argument("--centerline", type=Path, help="(n, 3) .npy centerline, 0.5 m spacing")
     ap.add_argument("--track-width", type=float, default=DEFAULT_TRACK_WIDTH_M, help="road width in metres used to normalise the line")
     ap.add_argument("--approach-m", type=float, default=120.0, help="distance before a corner scanned for brake onset")
+    ap.add_argument("--first-lap", action="store_true", help="multi-lap replays: analyse only the first lap")
     ap.add_argument("--top-k", type=int, default=5, help="fastest valid laps per driver used for the style ranges")
     ap.add_argument("--corner-curv", type=float, default=1 / 150, help="centerline curvature threshold (1/m) for corners")
     ap.add_argument("--corner-min-angle", type=float, default=20.0)
@@ -263,7 +279,7 @@ def main():
         lap_rows, corner_rows, skipped = [], [], []
         for f in track_files:
             try:
-                result, profile, why = analyse_lap(f, name, cl, corners, args.track_width / 2, args.approach_m)
+                result, profile, why = analyse_lap(f, name, cl, corners, args.track_width / 2, args.approach_m, args.first_lap)
             except SystemExit as exc:
                 result, profile, why = None, None, str(exc)
             except Exception as exc:  # one malformed replay must not stop a batch of hundreds
