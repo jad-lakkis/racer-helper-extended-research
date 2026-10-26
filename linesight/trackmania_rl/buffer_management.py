@@ -226,7 +226,7 @@ def fill_buffer_from_rollout_with_n_steps_rule(
             # kamikaze reward
             if (
                 engineered_kamikaze_reward != 0
-                and rollout_results["actions"][i] <= 2
+                and rollout_results["actions"][i] < getattr(config_copy, "n_forward_actions", 3)
                 or np.sum(rollout_results["state_float"][i][25:29]) <= 1
             ):
                 reward_into[i] += engineered_kamikaze_reward

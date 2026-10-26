@@ -35,10 +35,19 @@ def write_actions_in_tmi_format(action_idxs: List[int], outfile_path: Path):
     outfile = open(outfile_path, "w")
     time_from = 0
     time_delta_s = config.tm_engine_step_per_action * 0.01
+    analog = getattr(config, "analog_steering", False)
     last_press = {"accelerate": -1, "brake": -1, "left": -1, "right": -1}
+    last_steer = 0
     for action_idx in action_idxs[:-1]:
         action = config.inputs[action_idx]
+        if analog:
+            steer = int(round(action["steer"] * 65536))
+            if steer != last_steer:
+                outfile.write(f"{round(time_from, 2)} steer {steer}\n")
+                last_steer = steer
         for key, val in action.items():
+            if key == "steer" or (analog and key in ("left", "right")):
+                continue  # steering is written as "steer" lines when analog, and not as key presses
             if val:
                 if last_press[key] == -1:
                     last_press[key] = time_from
@@ -53,6 +62,8 @@ def write_actions_in_tmi_format(action_idxs: List[int], outfile_path: Path):
                 )
                 last_press[key] = -1
         time_from += time_delta_s
+    if analog and last_steer != 0:
+        outfile.write(f"{round(time_from, 2)} steer 0\n")
     for key, val in last_press.items():
         if val != -1:
             outfile.write(

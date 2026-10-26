@@ -25,6 +25,7 @@ enum MessageType {
     CToggleInterface = 21,
     CIsInMenus = 22,
     CGetInputs = 23,
+    CSetInputStateAnalog = 24,
 }
 
 const bool debug = false;
@@ -106,6 +107,27 @@ int HandleMessage()
             if(debug){
                 print("Server: Set speed to "+new_speed);
             }
+            break;
+        }
+
+        case MessageType::CSetInputStateAnalog: {
+            // accelerate, brake, then steering as an integer in [-65536, 65536] (negative = left)
+            const bool accelerate = clientSock.ReadUint8()>0;
+            const bool brake = clientSock.ReadUint8()>0;
+            const int steer = clientSock.ReadInt32();
+
+            if(debug){
+                print("Set analog input state to "+accelerate+brake+" steer "+steer);
+            }
+
+            if (simManager.InRace) {
+                simManager.SetInputState(InputType::Left, 0);
+                simManager.SetInputState(InputType::Right, 0);
+                simManager.SetInputState(InputType::Steer, steer);
+                simManager.SetInputState(InputType::Up, accelerate?1:0);
+                simManager.SetInputState(InputType::Down, brake?1:0);
+            }
+
             break;
         }
 

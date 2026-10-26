@@ -25,6 +25,13 @@ from config_files.inputs_list import *
 from config_files.state_normalization import *
 from config_files.user_config import *
 
+# Steering levels the agent can choose, as fractions of full lock (negative = left). The default is the original 3 keyboard-style levels
+# (12 actions). [-1, -0.5, 0, 0.5, 1] gives 20 actions and is sent to the game as analog steering, which needs the updated Python_Link.as
+# (it is copied to TMInterface at the start of training). Every other level count works too, e.g. 7 or 9 levels.
+steer_levels = [-1.0, 0.0, 1.0]
+inputs, action_forward_idx, action_backward_idx, n_forward_actions = make_inputs(steer_levels)
+analog_steering = any(abs(s) not in (0.0, 1.0) for s in steer_levels)  # True: send steering as analog values instead of key presses
+
 W_downsized = 160
 H_downsized = 120
 

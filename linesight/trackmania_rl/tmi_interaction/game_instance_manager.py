@@ -260,7 +260,7 @@ class GameInstanceManager:
         self.latest_tm_engine_speed_requested = requested_speed
 
     def request_inputs(self, action_idx: int, rollout_results: Dict):
-        self.iface.set_input_state(**config_copy.inputs[action_idx])
+        self.iface.set_input_state(**config_copy.inputs[action_idx], analog=getattr(config_copy, "analog_steering", False))
 
     def request_map(self, map_path: str, zone_centers: npt.NDArray):
         self.latest_map_path_requested = map_path
@@ -466,9 +466,14 @@ class GameInstanceManager:
                             0,
                             np.array(
                                 [
-                                    previous_action[input_str]
+                                    value
                                     for previous_action in previous_actions
-                                    for input_str in ["accelerate", "brake", "left", "right"]
+                                    for value in (
+                                        previous_action["accelerate"],
+                                        previous_action["brake"],
+                                        max(0.0, -previous_action["steer"]),  # amount of left steering, 0 or 1 with the 3 original levels
+                                        max(0.0, previous_action["steer"]),  # amount of right steering
+                                    )
                                 ]
                             ),  # NEW
                             sim_state_car_gear_and_wheels.ravel(),  # NEW

@@ -42,6 +42,7 @@ class MessageType(IntEnum):
     C_TOGGLE_INTERFACE = auto()
     C_IS_IN_MENUS = auto()
     C_GET_INPUTS = auto()
+    C_SET_INPUT_STATE_ANALOG = auto()
 
 
 class TMInterface:
@@ -94,7 +95,16 @@ class TMInterface:
         state.cp_data.resize(CheckpointData.cp_times_field, state.cp_data.cp_times_length)
         return state
 
-    def set_input_state(self, left: bool, right: bool, accelerate: bool, brake: bool):
+    def set_input_state(self, left: bool, right: bool, accelerate: bool, brake: bool, steer: float = 0.0, analog: bool = False):
+        """
+        analog=False: steering is the left / right key presses (the original behaviour, `steer` is ignored).
+        analog=True : steering is `steer`, a fraction of full lock in [-1, 1] (negative = left), sent as the integer the game expects
+                      in [-65536, 65536]. left / right are ignored.
+        """
+        if analog:
+            steer_int = int(round(max(-1.0, min(1.0, steer)) * 65536))
+            self.sock.sendall(struct.pack("=iBBi", MessageType.C_SET_INPUT_STATE_ANALOG, np.uint8(accelerate), np.uint8(brake), steer_int))
+            return
         self.sock.sendall(
             struct.pack("iBBBB", MessageType.C_SET_INPUT_STATE, np.uint8(left), np.uint8(right), np.uint8(accelerate), np.uint8(brake))
         )
