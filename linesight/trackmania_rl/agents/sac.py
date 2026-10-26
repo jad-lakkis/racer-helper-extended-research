@@ -208,12 +208,12 @@ class SACTrainer:
                 t.mul_(1 - self.tau).add_(s, alpha=self.tau)
 
         return dict(
-            critic_loss=float(critic_loss),
-            actor_loss=float(actor_loss),
-            alpha=float(self.alpha),
-            q_mean=float(torch.min(q1, q2).mean()),
-            target_mean=float(y.mean()),
-            entropy=float(-logp.mean()),
+            critic_loss=critic_loss.item(),
+            actor_loss=actor_loss.item(),
+            alpha=self.alpha.item(),
+            q_mean=torch.min(q1, q2).mean().item(),
+            target_mean=y.mean().item(),
+            entropy=(-logp.mean()).item(),
             critic_grad_norm=float(critic_norm),
             actor_grad_norm=float(actor_norm),
         )

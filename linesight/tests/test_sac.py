@@ -74,6 +74,18 @@ def test_actor_loss_does_not_touch_the_encoder_and_critic_loss_does():
     assert torch.allclose(trainer.target.encoder.state_dict()[k], expected, atol=1e-6)
 
 
+def test_actor_loss_sends_no_gradient_into_the_encoder():
+    net = make_net()
+    img = torch.randint(0, 255, (8, 1, *HW), dtype=torch.uint8)
+    floats = torch.randn(8, FLOAT_DIM)
+    f = net.encoder(img, floats).detach()  # what SACTrainer.update gives the actor and the temperature
+    a, logp = net.actor.policy_from_features(f)
+    q1, q2 = net.q_values(f, a)
+    (logp.mean() - torch.min(q1, q2).mean()).backward()
+    assert all(p.grad is None for p in net.encoder.parameters())
+    assert any(p.grad is not None for p in net.actor.actor_head.parameters())
+
+
 def test_nstep_transitions_by_hand():
     rewards = np.array([0.0, 1.0, 2.0, 3.0, 4.0])  # arriving in states 1..4
     nxt, r_n, disc = make_nstep_transitions(rewards, n_steps=2, gamma=0.5, ended_in_finish=True)
