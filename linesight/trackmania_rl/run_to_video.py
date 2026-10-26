@@ -27,6 +27,26 @@ def write_actions_from_disk_in_tmi_format(infile_path: Path, outfile_path: Path)
     write_actions_in_tmi_format(joblib.load(infile_path), outfile_path)
 
 
+def write_timelines_in_tmi_format(brake: np.ndarray, accel: np.ndarray, steer: np.ndarray, outfile_path: Path, period_s: float = 0.01):
+    """
+    Inputs of a continuous-action rollout (trackmania_rl.action_adapter.input_timelines: bool brake, bool accel, steering in [-1, 1],
+    one entry per 10 ms physics tick) as a TMInterface .inputs file: one `steer` line per change, one `press` range per pedal press.
+    """
+    names = {"accel": "up", "brake": "down"}
+    with open(outfile_path, "w") as outfile:
+        last_steer = 0
+        for i, s in enumerate(steer):
+            value = int(round(float(s) * 65536))
+            if value != last_steer:
+                outfile.write(f"{round(i * period_s, 2)} steer {value}\n")
+                last_steer = value
+        for key, line in (("accel", accel), ("brake", brake)):
+            on = np.concatenate([[False], np.asarray(line, dtype=bool), [False]])
+            starts, ends = np.where(on[1:] & ~on[:-1])[0], np.where(~on[1:] & on[:-1])[0]
+            for a, b in zip(starts, ends):
+                outfile.write(f"{round(a * period_s, 2)}-{round(b * period_s, 2)} press {names[key]}\n")
+
+
 def write_actions_in_tmi_format(action_idxs: List[int], outfile_path: Path):
     """
     Input : list of action indices.

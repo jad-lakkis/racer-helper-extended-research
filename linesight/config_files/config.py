@@ -252,11 +252,61 @@ humanlike_corner_entry_speed_reward_schedule = [
     (0, -0.2),
 ]
 
+# =======================================================================================================================
+# SAC with continuous actions and a driver style constraint (scripts/train_sac.py). The IQN pipeline (scripts/train.py) ignores this block.
+# docs/sac-style-constraint.md explains the pieces.
+# =======================================================================================================================
+sac_ticks_per_action = 4  # physics ticks (10 ms) per decision; 4 = 40 ms, as in AssettoCorsaGym. The pedals are played as duty cycles over them
+sac_steer_step = 0.0  # 0: steering as the network gives it; 0.1 or 0.2: rounded to that grid before it is sent
+
+# The driver to drive like: a package built by scripts/build_driver_package.py (path relative to the repository root).
+# It must be for the map(s) in map_cycle (same centerline). It gives the style ranges per corner and the reference laps.
+sac_driver_package = "style_vectors/Hockolicious/packages/tastysnack2.npz"
+sac_use_reference_context = True  # tell the agent where the reference line and speed are ahead (adds sac_n_reference_features floats)
+sac_n_reference_features = 13  # = trackmania_rl.driver_context.N_REFERENCE_FEATURES (checked at start)
+
+# Reward r = w_progress * metres advanced - w_line * |distance to the reference line| - w_time * seconds, then
+# r_adjusted = r - lambda_s * c_style - lambda_f * c_fail, all multiplied by sac_reward_scale.
+sac_w_progress = 0.01
+sac_w_line = 0.001
+sac_w_time = 0.0
+sac_reward_scale = 10.0
+# Constraints: mean style cost per lap <= sac_style_budget (B), fraction of failed laps <= sac_failure_budget (eps). The multipliers
+# follow  lambda <- max(0, lambda + eta * (measured - budget))  after every sac_lambda_update_every_laps laps.
+sac_lambda_s_init = 0.1
+sac_lambda_f_init = 0.5
+sac_eta_s = 0.01
+sac_eta_f = 0.1
+sac_style_budget = 2.0
+sac_failure_budget = 0.1
+sac_lambda_update_every_laps = 5
+sac_target_gain_ms = 300  # a lap counts as output when it is this much faster than the driver's best, and its style cost is within the budget
+
+sac_gamma = 0.995
+sac_n_steps = 3
+sac_batch_size = 256
+sac_lr_critic = 3e-4
+sac_lr_actor = 3e-4
+sac_lr_alpha = 3e-4
+sac_tau = 0.005
+sac_target_entropy = -3.0
+sac_init_alpha = 0.1
+sac_hidden_dim = 512
+sac_float_hidden_dim = 256
+sac_replay_capacity = 60_000  # transitions; images are kept twice (state and next state), about 40 kB per transition
+sac_start_learning_after = 5_000  # transitions in the replay before the first update
+sac_updates_per_transition = 0.5  # gradient updates per new transition
+sac_random_steps = 2_000  # the first decisions of an exploring worker are a wobbling full-throttle drive, not the untrained policy
+sac_actor_sync_every_updates = 200  # how often the workers get the new actor
+sac_save_every_s = 300
+sac_device = "auto"  # "auto": cuda if available, else cpu
+
 n_steps = 3
 constant_reward_per_ms = -6 / 5000
 reward_per_m_advanced_along_centerline = 5 / 500
 
 float_input_dim = 27 + 3 * n_zone_centers_in_inputs + 4 * n_prev_actions_in_inputs + 4 * n_contact_material_physics_behavior_types + 1
+sac_float_input_dim = float_input_dim + (sac_n_reference_features if sac_use_reference_context else 0)  # state of the SAC agent
 float_hidden_dim = 256
 conv_head_output_dim = 5632
 dense_hidden_dimension = 1024

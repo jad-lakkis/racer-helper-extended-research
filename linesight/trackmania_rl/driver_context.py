@@ -20,6 +20,7 @@ from typing import List, Optional, Sequence
 import numpy as np
 
 from trackmania_rl.style_constraint import DriverStyle
+from trackmania_rl.style_features import CenterlineTracker
 
 LOOK_AHEAD_M = (0.0, 15.0, 30.0, 60.0, 100.0, 150.0)
 SPEED_CENTER_KMH, SPEED_SCALE_KMH = 150.0, 100.0
@@ -129,3 +130,27 @@ class DriverPackage:
 def reference_feature_mean_std() -> tuple:
     """Mean and std to normalise the reference features with (they are already of order 1, so identity)."""
     return np.zeros(N_REFERENCE_FEATURES, dtype=np.float32), np.ones(N_REFERENCE_FEATURES, dtype=np.float32)
+
+
+class RolloutStyleContext:
+    """
+    The reference line for the rollouts of one game instance: begin() picks the reference lap of the next rollout, observe() gives the
+    state features for the car's position (the projection onto the centerline is tracked from step to step, as for the style measurement).
+    """
+
+    def __init__(self, package: DriverPackage, dt_s: float, seed: int = 0):
+        self.package = package
+        self.dt_s = dt_s
+        self.tracker = CenterlineTracker(package.style.centerline)
+        self.rng = np.random.default_rng(seed)
+        self.reference: Optional[ReferenceLap] = None
+
+    def begin(self) -> ReferenceLap:
+        self.tracker.reset()
+        self.reference = self.package.sample_reference(self.rng)
+        return self.reference
+
+    def observe(self, position, speed_ms: float) -> np.ndarray:
+        assert self.reference is not None, "begin() has not been called for this rollout"
+        p, e = self.tracker.step(position, speed_ms, self.dt_s)
+        return self.package.reference_features(self.reference, p, e)

@@ -26,7 +26,7 @@ import os
 import socket
 import subprocess
 import time
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Optional
 
 import cv2
 import numba
@@ -36,6 +36,8 @@ import psutil
 
 from config_files import config_copy, user_config
 from trackmania_rl import contact_materials, map_loader
+from trackmania_rl.action_adapter import ActionSpec, from_policy_output, game_command, quantize
+from trackmania_rl.sac_rollout import previous_action_features
 from trackmania_rl.tmi_interaction.tminterface2 import MessageType, TMInterface
 
 if config_copy.is_linux:
@@ -262,6 +264,16 @@ class GameInstanceManager:
     def request_inputs(self, action_idx: int, rollout_results: Dict):
         self.iface.set_input_state(**config_copy.inputs[action_idx], analog=getattr(config_copy, "analog_steering", False))
 
+    def request_continuous_inputs(self, raw_action: npt.NDArray, spec: ActionSpec) -> npt.NDArray:
+        """
+        Play one continuous decision: the network output in [-1, 1]^3 becomes (steer, throttle, brake), the pedals are played as
+        duty cycles over the ticks of the decision by the plugin. Returns the action that is executed (after quantization).
+        """
+        action = quantize(from_policy_output(raw_action), spec)
+        steer_int, throttle_mask, brake_mask = game_command(action, spec)
+        self.iface.set_input_pattern(steer_int, spec.ticks_per_action, throttle_mask, brake_mask)
+        return action
+
     def request_map(self, map_path: str, zone_centers: npt.NDArray):
         self.latest_map_path_requested = map_path
         if user_config.is_linux:
@@ -276,7 +288,23 @@ class GameInstanceManager:
             self.max_allowable_distance_to_real_checkpoint,
         ) = map_loader.sync_virtual_and_real_checkpoints(zone_centers, map_path)
 
-    def rollout(self, exploration_policy: Callable, map_path: str, zone_centers: npt.NDArray, update_network: Callable):
+    def rollout(
+        self,
+        exploration_policy: Callable,
+        map_path: str,
+        zone_centers: npt.NDArray,
+        update_network: Callable,
+        continuous_spec: Optional[ActionSpec] = None,
+        style_context=None,
+    ):
+        """
+        Discrete mode (default): exploration_policy returns an index into config_copy.inputs.
+        Continuous mode (continuous_spec given, used by SAC): exploration_policy returns the network output in [-1, 1]^3, played with
+        request_continuous_inputs; the rollout then also records the car position, speed and executed action of every decision
+        (needed to measure the style of the lap), and the position at the finish.
+        style_context (driver_context.RolloutStyleContext): appends the reference-line features to the state.
+        """
+        continuous = continuous_spec is not None
         (
             zone_transitions,
             distance_between_zone_transitions,
@@ -315,6 +343,10 @@ class GameInstanceManager:
             "state_float": [],
             "furthest_zone_idx": 0,
         }
+        if continuous:
+            rollout_results.update({"executed_actions": [], "positions": [], "speeds_kmh": [], "end_position": None})
+        if style_context is not None:
+            rollout_results["reference_lap_id"] = style_context.begin().lap_id
 
         last_progress_improvement_ms = 0
 
@@ -454,28 +486,32 @@ class GameInstanceManager:
                     state_car_velocity_in_car_reference_system = sim_state_orientation.dot(sim_state_velocity)
                     state_car_angular_velocity_in_car_reference_system = sim_state_orientation.dot(sim_state_angular_speed)
 
-                    previous_actions = [
-                        config_copy.inputs[rollout_results["actions"][k] if k >= 0 else config_copy.action_forward_idx]
-                        for k in range(
-                            len(rollout_results["actions"]) - config_copy.n_prev_actions_in_inputs, len(rollout_results["actions"])
+                    if continuous:
+                        previous_action_values = previous_action_features(
+                            rollout_results["executed_actions"], config_copy.n_prev_actions_in_inputs
                         )
-                    ]
+                    else:
+                        previous_actions = [
+                            config_copy.inputs[rollout_results["actions"][k] if k >= 0 else config_copy.action_forward_idx]
+                            for k in range(
+                                len(rollout_results["actions"]) - config_copy.n_prev_actions_in_inputs, len(rollout_results["actions"])
+                            )
+                        ]
+                        previous_action_values = [
+                            value
+                            for previous_action in previous_actions
+                            for value in (
+                                previous_action["accelerate"],
+                                previous_action["brake"],
+                                max(0.0, -previous_action["steer"]),  # amount of left steering, 0 or 1 with the 3 original levels
+                                max(0.0, previous_action["steer"]),  # amount of right steering
+                            )
+                        ]
 
                     floats = np.hstack(
                         (
                             0,
-                            np.array(
-                                [
-                                    value
-                                    for previous_action in previous_actions
-                                    for value in (
-                                        previous_action["accelerate"],
-                                        previous_action["brake"],
-                                        max(0.0, -previous_action["steer"]),  # amount of left steering, 0 or 1 with the 3 original levels
-                                        max(0.0, previous_action["steer"]),  # amount of right steering
-                                    )
-                                ]
-                            ),  # NEW
+                            np.array(previous_action_values),  # NEW
                             sim_state_car_gear_and_wheels.ravel(),  # NEW
                             state_car_angular_velocity_in_car_reference_system.ravel(),  # NEW
                             state_car_velocity_in_car_reference_system.ravel(),
@@ -492,6 +528,13 @@ class GameInstanceManager:
 
                         )
                     ).astype(np.float32)
+
+                    if continuous:
+                        speed_ms = float(np.linalg.norm(sim_state_velocity))
+                        rollout_results["positions"].append(sim_state_position)
+                        rollout_results["speeds_kmh"].append(3.6 * speed_ms)
+                        if style_context is not None:
+                            floats = np.concatenate((floats, style_context.observe(sim_state_position, speed_ms))).astype(np.float32)
 
                     pc5 = time.perf_counter_ns()
                     instrumentation__grab_floats += pc5 - pc2
@@ -629,6 +672,11 @@ class GameInstanceManager:
                                 len(rollout_results["current_zone_idx"]) == len(rollout_results["frames"]) + 1
                             ):  # Handle the case where the floats have been computed but the race ended so we don't actually compute an action
                                 rollout_results["current_zone_idx"].pop(-1)
+                                if continuous:
+                                    rollout_results["positions"].pop(-1)
+                                    rollout_results["speeds_kmh"].pop(-1)
+                            if continuous:
+                                rollout_results["end_position"] = np.array(simulation_state.dyna.current_state.position, dtype=np.float32)
 
                             end_race_stats["race_finished"] = True
                             end_race_stats["race_time"] = simulation_state.race_time
@@ -715,7 +763,13 @@ class GameInstanceManager:
                         pc8 = time.perf_counter_ns()
                         instrumentation__exploration_policy += pc8 - pc7
 
-                        self.request_inputs(action_idx, rollout_results)
+                        if continuous:
+                            executed_action = self.request_continuous_inputs(action_idx, continuous_spec)
+                            rollout_results["executed_actions"].append(executed_action)
+                            accelerate_pressed = executed_action[1] > 0
+                        else:
+                            self.request_inputs(action_idx, rollout_results)
+                            accelerate_pressed = config_copy.inputs[action_idx]["accelerate"]
                         self.request_speed(self.running_speed)
 
                         if n_th_action_we_compute == 0:
@@ -723,7 +777,7 @@ class GameInstanceManager:
                             for i, val in enumerate(np.nditer(q_values)):
                                 end_race_stats[f"q_value_{i}_starting_frame"] = val
                         rollout_results["meters_advanced_along_centerline"].append(distance_since_track_begin)
-                        rollout_results["input_w"].append(config_copy.inputs[action_idx]["accelerate"])
+                        rollout_results["input_w"].append(accelerate_pressed)
                         rollout_results["actions"].append(action_idx)
                         rollout_results["action_was_greedy"].append(action_was_greedy)
                         rollout_results["car_gear_and_wheels"].append(sim_state_car_gear_and_wheels)

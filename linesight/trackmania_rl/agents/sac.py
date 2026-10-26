@@ -219,6 +219,23 @@ class SACTrainer:
         )
 
 
+    def state_dict(self) -> Dict[str, object]:
+        return dict(
+            net=self.net.state_dict(),
+            target=self.target.state_dict(),
+            critic_opt=self.critic_opt.state_dict(),
+            actor_opt=self.actor_opt.state_dict(),
+            alpha_opt=self.alpha_opt.state_dict(),
+        )
+
+    def load_state_dict(self, state: Dict[str, object]):
+        self.net.load_state_dict(state["net"])
+        self.target.load_state_dict(state["target"])
+        self.critic_opt.load_state_dict(state["critic_opt"])
+        self.actor_opt.load_state_dict(state["actor_opt"])
+        self.alpha_opt.load_state_dict(state["alpha_opt"])
+
+
 class SACInferer:
     """Runs the actor on one state. Used by the data-collecting workers."""
 
@@ -268,6 +285,19 @@ class ReplayBuffer:
         self.next_img[i], self.next_floats[i] = next_img, next_floats
         self.pos = (i + 1) % self.capacity
         self.size = min(self.size + 1, self.capacity)
+
+    def add_many(self, img, floats, action, reward_n, discount_n, next_img, next_floats):
+        """Append n transitions at once (arrays with a leading dimension n); the oldest ones are overwritten when the buffer is full."""
+        n = len(reward_n)
+        if n > self.capacity:  # only the newest `capacity` can be kept
+            img, floats, action, reward_n, discount_n, next_img, next_floats = (a[-self.capacity :] for a in (img, floats, action, reward_n, discount_n, next_img, next_floats))
+            n = self.capacity
+        idx = (self.pos + np.arange(n)) % self.capacity
+        self.img[idx], self.floats[idx], self.action[idx] = img, floats, action
+        self.reward_n[idx], self.discount_n[idx] = reward_n, discount_n
+        self.next_img[idx], self.next_floats[idx] = next_img, next_floats
+        self.pos = (self.pos + n) % self.capacity
+        self.size = min(self.size + n, self.capacity)
 
     def sample(self, batch_size: int, device: str, rng: Optional[np.random.Generator] = None) -> Dict[str, torch.Tensor]:
         idx = (rng or np.random).integers(0, self.size, size=batch_size)
