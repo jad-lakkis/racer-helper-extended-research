@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
-Cluster and plot the style vectors written by extract_style_vectors.py.
+Plot the style vectors written by extract_style_vectors.py (no clustering; see cluster_driver_styles.py).
 
-For every track folder under <style_vectors>/ this writes (to <style_vectors>/figures/):
-  <track>_corners_map.png    centerline with the detected corners numbered
-  <track>_style_heatmap.png  one row per lap, one column per corner, one panel per z component
-  <track>_profiles.png       speed / lateral line / brake / throttle against track distance
-  <track>_style_space.png    PCA of the lap-level style vectors     (needs >= MIN_LAPS laps)
-  <track>_cluster_cards.png  what each style cluster looks like     (needs >= MIN_LAPS laps)
-  <track>_driver_style_space.png, <track>_driver_cluster_corner_styles.png, <track>_time_band_corner_styles.png,
-  <track>_driver_cluster_vs_<me>.png, <track>_time_band_vs_<me>.png   one style vector per driver, clustered
-and lap_clusters.csv + clusters.json (cluster -> RL conditioning values) next to the data.
+For every track folder under <style_vectors>/ this writes to <style_vectors>/figures/:
+  <track>_corners_map.png            centerline with the detected corners numbered
+  <track>_features_vs_time.png       lap-level style features against lap time
+  <track>_band_profiles.png          speed / line / brake along the track for each lap-time band
+  <track>_time_band_corner_styles.png  mean style vector per corner for each best-lap band, plus the --me driver
+  <track>_time_band_vs_<me>.png      band minus the --me driver, per corner
+  <track>_style_heatmap.png, <track>_profiles.png   per-lap versions, only for tracks with <= 60 laps
+and drivers.csv, driver_style_vectors.csv (one row per driver) next to the data.
 
 Usage (from linesight/):
   python scripts/analyze_style_vectors.py ../style_vectors
@@ -27,28 +26,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from sklearn.cluster import KMeans
-from sklearn.decomposition import PCA
-from sklearn.metrics import adjusted_rand_score, silhouette_score
-from sklearn.preprocessing import StandardScaler
 
-MIN_LAPS = 8  # below this, clustering says nothing, so only per-lap style cards are drawn
-MAX_K = 6
+MIN_LAPS = 8  # below this, the across-lap figures say nothing
 
-# lap-level features that define "style" (lap time itself is deliberately not one of them)
-STYLE_FEATURES = [
-    "mean_b",
-    "mean_f",
-    "mean_l_entry",
-    "mean_l_apex",
-    "mean_l_exit",
-    "mean_s",
-    "mean_b_approach",
-    "mean_brake_onset_m",
-    "mean_v_entry_ratio",
-    "oversteer_understeer_score",
-]
-CONDITIONING = ["braking_aggression", "risk_tolerance_proxy", "oversteer_understeer_score", "corner_entry_speed_ratio"]
 HEATMAP_PANELS = [
     ("b", "braking fraction b", "viridis", (0, 1)),
     ("f", "full-throttle fraction f", "viridis", (0, 1)),
@@ -140,58 +120,10 @@ def plot_profiles(laps: pd.DataFrame, profiles: dict, corners_def: dict, fig_dir
     plt.close(fig)
 
 
-def cluster_laps(laps: pd.DataFrame):
-    feats = laps[STYLE_FEATURES].copy()
-    feats = feats.fillna(feats.median())
-    z = StandardScaler().fit_transform(feats)
-    best = None
-    for k in range(2, min(MAX_K, len(laps) // 3) + 1):
-        km = KMeans(n_clusters=k, n_init=20, random_state=0).fit(z)
-        score = silhouette_score(z, km.labels_)
-        if best is None or score > best[0]:
-            best = (score, k, km.labels_)
-    return z, best
 
 
-def plot_style_space(laps: pd.DataFrame, z: np.ndarray, fig_dir: Path, track: str, silhouette: float):
-    pca = PCA(n_components=2).fit(z)
-    xy = pca.transform(z)
-    fig, ax = plt.subplots(figsize=(8, 6.5))
-    drivers = sorted(laps["driver"].unique())
-    markers = "osD^vP*Xh<>"
-    cmap = plt.get_cmap("tab10")
-    for i, (d, g) in enumerate(laps.groupby("driver")):
-        idx = [laps.index.get_loc(j) for j in g.index]
-        ax.scatter(xy[idx, 0], xy[idx, 1], c=[cmap(int(c) % 10) for c in g["style_cluster"]], marker=markers[drivers.index(d) % len(markers)], s=45, edgecolor="k", lw=0.4, label=d)
-    ax.set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.0%})")
-    ax.set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.0%})")
-    ax.set_title(f"{track}: laps in style space (colour = cluster, marker = driver), silhouette {silhouette:.2f}")
-    if len(drivers) <= 12:
-        ax.legend(fontsize=7, title="driver")
-    fig.savefig(fig_dir / f"{track}_style_space.png", dpi=130, bbox_inches="tight")
-    plt.close(fig)
 
 
-def plot_cluster_cards(laps: pd.DataFrame, fig_dir: Path, track: str):
-    ks = sorted(laps["style_cluster"].unique())
-    z = (laps[STYLE_FEATURES] - laps[STYLE_FEATURES].mean()) / laps[STYLE_FEATURES].std(ddof=0).replace(0, 1)
-    cent = z.groupby(laps["style_cluster"]).mean()
-    fig, axes = plt.subplots(1, len(ks), figsize=(3.2 * len(ks) + 2, 4.5), sharey=True)
-    axes = np.atleast_1d(axes)
-    for ax, k in zip(axes, ks):
-        v = cent.loc[k].values
-        ax.barh(range(len(STYLE_FEATURES)), v, color=["tab:red" if x > 0 else "tab:blue" for x in v])
-        ax.set_yticks(range(len(STYLE_FEATURES)))
-        ax.set_yticklabels([f.replace("mean_", "") for f in STYLE_FEATURES], fontsize=8)
-        ax.axvline(0, color="k", lw=0.6)
-        sub = laps[laps["style_cluster"] == k]
-        ax.set_title(f"cluster {k}: {len(sub)} laps, {sub['driver'].nunique()} drivers\nmedian {sub['lap_time_ms'].median() / 1000:.2f}s", fontsize=9)
-        ax.set_xlim(-2.5, 2.5)
-    axes[0].invert_yaxis()
-    fig.supxlabel("z-score vs all laps on this track")
-    fig.tight_layout()
-    fig.savefig(fig_dir / f"{track}_cluster_cards.png", dpi=130, bbox_inches="tight")
-    plt.close(fig)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -207,7 +139,6 @@ DRIVER_PANELS = [
     ("v_entry_ratio", "entry speed / peak speed", "viridis", (0.4, 1)),
     ("brake_onset_m", "brake onset before corner (m)", "viridis", (0, 120)),
 ]
-N_PCS = 8
 
 
 def driver_matrix(laps: pd.DataFrame, corners: pd.DataFrame) -> pd.DataFrame:
@@ -218,50 +149,8 @@ def driver_matrix(laps: pd.DataFrame, corners: pd.DataFrame) -> pd.DataFrame:
     return g.reindex(columns=cols)
 
 
-def cluster_drivers(wide: pd.DataFrame, max_k: int = MAX_K, n_boot: int = 30):
-    X = wide.fillna(wide.median())
-    scaler = StandardScaler().fit(X)
-    pca = PCA(n_components=min(N_PCS, X.shape[0] - 1, X.shape[1])).fit(scaler.transform(X))
-    Z = pca.transform(scaler.transform(X))
-    table, best = [], None
-    for k in range(2, min(max_k, len(X) // 4) + 1):
-        km = KMeans(n_clusters=k, n_init=20, random_state=0).fit(Z)
-        sil = silhouette_score(Z, km.labels_)
-        # stability: refit on 80 % bootstrap-free subsamples, compare labels on the held-in drivers
-        rng, aris = np.random.default_rng(0), []
-        for _ in range(n_boot):
-            idx = rng.choice(len(Z), int(0.8 * len(Z)), replace=False)
-            sub = KMeans(n_clusters=k, n_init=5, random_state=0).fit(Z[idx])
-            aris.append(adjusted_rand_score(km.labels_[idx], sub.labels_))
-        table.append(dict(k=k, silhouette=round(float(sil), 3), stability_ari=round(float(np.mean(aris)), 3)))
-        if best is None or sil > best[0]:
-            best = (sil, k, km.labels_)
-    return X, scaler, pca, Z, best, pd.DataFrame(table)
 
 
-def plot_driver_space(drivers: pd.DataFrame, Z, pca, fig_dir: Path, track: str, me: list):
-    fig, axes = plt.subplots(1, 2, figsize=(15, 6.2))
-    cmap = plt.get_cmap("tab10")
-    size = 15 + 6 * np.minimum(drivers["n_laps"].values, 10)
-    for k in sorted(drivers["cluster"].unique()):
-        m = (drivers["cluster"] == k).values
-        axes[0].scatter(Z[m, 0], Z[m, 1], s=size[m], color=cmap(int(k) % 10), edgecolor="k", lw=0.3, alpha=0.8, label=f"cluster {k} (n={m.sum()})")
-    sc = axes[1].scatter(Z[:, 0], Z[:, 1], s=size, c=drivers["best_time_s"], cmap="viridis_r", edgecolor="k", lw=0.3)
-    fig.colorbar(sc, ax=axes[1], label="driver's best lap (s)")
-    for ax in axes:
-        for name in me:
-            if name in drivers.index:
-                i = drivers.index.get_loc(name)
-                ax.scatter(Z[i, 0], Z[i, 1], marker="*", s=380, color="gold", edgecolor="k", zorder=5)
-                ax.annotate(name, (Z[i, 0], Z[i, 1]), xytext=(8, 8), textcoords="offset points", fontweight="bold")
-        ax.set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.0%})")
-        ax.set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.0%})")
-    axes[0].legend(fontsize=8)
-    axes[0].set_title("drivers in style space, coloured by cluster (size = number of laps)", fontsize=10)
-    axes[1].set_title("same space coloured by speed: how much of the style axes is skill", fontsize=10)
-    fig.suptitle(f"{track}: one style vector per driver")
-    fig.savefig(fig_dir / f"{track}_driver_style_space.png", dpi=130, bbox_inches="tight")
-    plt.close(fig)
 
 
 def plot_group_corner_profiles(groups: dict, wide: pd.DataFrame, fig_dir: Path, track: str, name: str, me: list):
@@ -385,7 +274,7 @@ def plot_band_profiles(laps: pd.DataFrame, profiles: dict, corners_def: dict, ba
     plt.close(fig)
 
 
-def analyse_drivers(track_dir: Path, fig_dir: Path, track: str, laps: pd.DataFrame, corners: pd.DataFrame, me: list, bands: list, cluster: bool):
+def analyse_drivers(track_dir: Path, fig_dir: Path, track: str, laps: pd.DataFrame, corners: pd.DataFrame, me: list, bands: list):
     wide = driver_matrix(laps, corners)
     info = laps.groupby("driver").agg(n_laps=("lap_id", "count"), best_time_s=("lap_time_ms", lambda x: x.min() / 1000))
     info = info.reindex(wide.index)
@@ -396,51 +285,16 @@ def analyse_drivers(track_dir: Path, fig_dir: Path, track: str, laps: pd.DataFra
         if members:
             time_bands[f"{lo:g}-{hi:g}s" if hi < 1e9 else f">{lo:g}s"] = members
     print("  drivers per best-lap band:", {k: len(v) for k, v in time_bands.items()})
-    if len(wide) < 5:
-        return {}
-    plot_group_corner_profiles(time_bands, wide, fig_dir, track, "time_band", me)
-    mine = [m for m in me if m in wide.index]
-    for m in mine:
-        plot_me_vs_groups(time_bands, wide, fig_dir, track, "time_band", m)
     info.to_csv(track_dir / "drivers.csv")
     wide.to_csv(track_dir / "driver_style_vectors.csv")
-    if not cluster:
-        return {}
-    if len(wide) < 12:
-        print(f"  {len(wide)} drivers: too few to cluster drivers")
-        return {}
-    X, scaler, pca, Z, (sil, k, labels), table = cluster_drivers(wide)
-    info["cluster"] = labels
-    print(f"  {len(wide)} drivers -> {k} clusters, silhouette {sil:.2f}\n" + table.to_string(index=False))
-    plot_driver_space(info, Z, pca, fig_dir, track, me)
-    clusters = {f"cluster {c}": list(info.index[info["cluster"] == c]) for c in sorted(info["cluster"].unique())}
-    plot_group_corner_profiles(clusters, wide, fig_dir, track, "driver_cluster", me)
-    for m in mine:
-        plot_me_vs_groups(clusters, wide, fig_dir, track, "driver_cluster", m)
-        d = np.linalg.norm(Z - Z[wide.index.get_loc(m)], axis=1)
-        nearest = info.assign(distance=d).drop(index=m).nsmallest(5, "distance")
-        print(f"  {m}: cluster {info.loc[m, 'cluster']}, closest drivers:\n" + nearest[["best_time_s", "n_laps", "cluster", "distance"]].round(2).to_string())
-    info = info.join(pd.DataFrame(Z[:, :3], index=info.index, columns=["pc1", "pc2", "pc3"]))
-    info.to_csv(track_dir / "drivers.csv")
-    out = dict(
-        silhouette_by_k=table.to_dict("records"),
-        chosen_k=int(k),
-        clusters={
-            c: dict(
-                n_drivers=len(m),
-                median_best_time_s=float(info.loc[m, "best_time_s"].median()),
-                mean_style={f: float(wide.loc[m, f].mean().mean()) for f in DRIVER_FEATURES},
-                rl_conditioning=laps[laps["driver"].isin(m)][CONDITIONING].mean().round(3).to_dict(),
-            )
-            for c, m in clusters.items()
-        },
-        spearman_pc1_vs_best_time=float(pd.Series(Z[:, 0]).corr(info["best_time_s"].reset_index(drop=True), method="spearman")),
-    )
-    json.dump(out, open(track_dir / "driver_clusters.json", "w"), indent=2)
-    return out
+    if len(wide) < 5:
+        return
+    plot_group_corner_profiles(time_bands, wide, fig_dir, track, "time_band", me)
+    for m in [m for m in me if m in wide.index]:
+        plot_me_vs_groups(time_bands, wide, fig_dir, track, "time_band", m)
 
 
-def analyse_track(track_dir: Path, fig_dir: Path, me: list, bands: list, cluster: bool):
+def analyse_track(track_dir: Path, fig_dir: Path, me: list, bands: list):
     track = track_dir.name
     laps = pd.read_csv(track_dir / "laps.csv")
     corners = pd.read_csv(track_dir / "corners.csv")
@@ -449,52 +303,19 @@ def analyse_track(track_dir: Path, fig_dir: Path, me: list, bands: list, cluster
     print(f"\n== {track}: {len(laps)} laps, {laps['driver'].nunique()} drivers, {len(corners_def['corners'])} corners")
 
     plot_corner_map(track_dir, corners_def, profiles, fig_dir, track)
-    analyse_drivers(track_dir, fig_dir, track, laps, corners, me, bands, cluster)
+    analyse_drivers(track_dir, fig_dir, track, laps, corners, me, bands)
     if len(laps) >= MIN_LAPS and "steer_input" in laps:
         plot_feature_vs_time(laps, fig_dir, track, me)
         plot_band_profiles(laps, profiles, corners_def, bands, fig_dir, track, me)
-    order = "lap_time_ms"
-    summary = {}
-
-    if cluster and len(laps) >= MIN_LAPS:
-        z, best = cluster_laps(laps)
-        silhouette, k, labels = best
-        laps["style_cluster"] = labels
-        order = "style_cluster"
-        plot_style_space(laps, z, fig_dir, track, silhouette)
-        plot_cluster_cards(laps, fig_dir, track)
-        print(f"  {k} style clusters (silhouette {silhouette:.2f})")
-        summary["clusters"] = {}
-        for c, g in laps.groupby("style_cluster"):
-            summary["clusters"][int(c)] = dict(
-                n_laps=len(g),
-                drivers=sorted(g["driver"].unique()),
-                median_lap_time_ms=float(g["lap_time_ms"].median()),
-                style=g[STYLE_FEATURES].mean().round(3).to_dict(),
-                rl_conditioning=g[CONDITIONING].mean().round(3).to_dict(),
-            )
-        # how much of each style feature is just "being fast"
-        corr = laps[STYLE_FEATURES].corrwith(laps["lap_time_ms"], method="spearman").round(2)
-        summary["spearman_with_lap_time"] = corr.to_dict()
-        print("  Spearman vs lap time:", corr.to_dict())
-        laps[["lap_id", "driver", "lap_time_ms", "style_cluster"]].to_csv(track_dir / "lap_clusters.csv", index=False)
-        json.dump(summary, open(track_dir / "clusters.json", "w"), indent=2)
-        profile_color = "style_cluster"
-    else:
-        print(f"  no lap clustering ({len(laps)} laps, clustering {'on' if cluster else 'off'})")
-        profile_color = "lap_id"
-
     if len(laps) <= 60:  # per-lap figures stay readable only for a modest number of laps
-        plot_heatmap(laps, corners, fig_dir, track, order)
-        plot_profiles(laps, profiles, corners_def, fig_dir, track, profile_color)
-    return summary
+        plot_heatmap(laps, corners, fig_dir, track, "lap_time_ms")
+        plot_profiles(laps, profiles, corners_def, fig_dir, track, "lap_id")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("style_dir", type=Path)
-    ap.add_argument("--me", default="jadlakkisjad", help="comma-separated driver login(s) to compare against the clusters and time bands")
-    ap.add_argument("--cluster", action="store_true", help="also cluster laps and drivers into style groups (off by default)")
+    ap.add_argument("--me", default="jadlakkisjad", help="comma-separated driver login(s) to compare against the time bands")
     ap.add_argument("--bands", default="54,56,58,62", help="best-lap band edges in seconds for the time-band comparison")
     args = ap.parse_args()
     fig_dir = args.style_dir / "figures"
@@ -503,7 +324,7 @@ def main():
     if not tracks:
         sys.exit(f"No <track>/laps.csv under {args.style_dir}; run extract_style_vectors.py first")
     for d in tracks:
-        analyse_track(d, fig_dir, [m for m in args.me.split(",") if m], [float(b) for b in args.bands.split(",")], args.cluster)
+        analyse_track(d, fig_dir, [m for m in args.me.split(",") if m], [float(b) for b in args.bands.split(",")])
     print(f"\nfigures in {fig_dir}")
 
 

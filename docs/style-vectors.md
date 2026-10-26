@@ -49,3 +49,10 @@ RL conditioning values.
 - Track width is assumed to be 32 m (`--track-width`). Raw offsets in metres are in `style_vectors/<track>/profiles/*.npz`.
 - Laps with respawns, or that cover under 90 % of the centerline, are skipped.
 - Position is sampled every 100 ms, so corners shorter than about 0.3 s are noisy.
+
+## Clustering drivers
+
+```
+python scripts/cluster_driver_styles.py ../style_vectors --me jadlakkisjad [--raw]
+```
+See `style_vectors/README.md` for the method and the Hockolicious result (no distinct style groups after removing speed and steering device).
