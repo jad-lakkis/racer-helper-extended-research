@@ -1,0 +1,23 @@
+[
+ ["Monza GP", 5169102, "it-1922"],
+ ["Monza Italian GP", 11025246, "it-1922"],
+ ["Spa GT14", 7942362, "be-1925"],
+ ["Spa F1", 2751668, "be-1925"],
+ ["Nurburgring GP", 92448, "de-1927"],
+ ["Silverstone", 1806358, "gb-1948"],
+ ["Silverstone Frankys", 1097498, "gb-1948"],
+ ["Catalunya F1 GPs", 1482521, "es-1991"],
+ ["Interlagos GP", 12851169, "br-1940"],
+ ["Interlagos F1", 356666, "br-1940"],
+ ["Monaco GP Single", 2737786, "mc-1929"],
+ ["Super Monaco GP", 1097759, "mc-1929"],
+ ["Suzuka ESL", 3821629, "jp-1962"],
+ ["Suzuka", 151312, "jp-1962"],
+ ["Suzuka F1 Japan", 6990216, "jp-1962"],
+ ["Imola F1", 66001, "it-1953"],
+ ["Hungaroring F1", 6671637, "hu-1986"],
+ ["COTA", 8425178, "us-2012"],
+ ["Red Bull Ring F1", 6674037, "at-1969"],
+ ["Albert Park", 2906878, "au-1953"],
+ ["Bahrain GP", 13640893, "bh-2002"]
+]
