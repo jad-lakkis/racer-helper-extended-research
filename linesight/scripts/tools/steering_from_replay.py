@@ -7,7 +7,7 @@ the inputs are only left / straight / right, and the game smooths them into a re
 What can be recovered is the effective steering: how much steering the path implies at that speed.
 
 Model: u(t) ~ g(speed) * path_curvature(t + LAG), fitted on replays with analog steering (where the true value is stored) and clipped to [-1, 1].
-Positive u = right, as in the analog replay events.
+Positive u = right, the same for keyboard and analog replays.
 
   fit:      python scripts/tools/steering_from_replay.py fit ../style_vectors/Hockolicious/laps.csv ../replays --out scripts/tools/steering_model.json
   estimate: python scripts/tools/steering_from_replay.py estimate some.Replay.Gbx

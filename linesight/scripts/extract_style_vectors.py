@@ -198,7 +198,8 @@ def _steer_signal(control_entries, race_start_ms: int, n: int):
     Steering command u in [-1, 1] on the 10 ms grid, held between events, plus the input type.
     Replays store steering either as digital SteerLeft/SteerRight presses or as 'Steer' events
     (analog value for pad / wheel drivers, -1/0/+1 for keyboard drivers on newer replays).
-    The sign convention between the two encodings is not needed: only |u| and its changes are used.
+    + = right in both. (In the replay files the analog value is positive for a left turn, checked on 40 keyboard laps against the
+    path they drove; the features in corners.csv only use |u| and its changes, so they do not depend on the sign.)
     """
     steer = sorted([(e.time - race_start_ms, decode_analog_steer(e)) for e in control_entries if e.event_name == "Steer"])
     if steer:
@@ -207,7 +208,7 @@ def _steer_signal(control_entries, race_start_ms: int, n: int):
             while ptr < len(steer) and steer[ptr][0] <= i * PERIOD_MS:
                 cur = steer[ptr][1]
                 ptr += 1
-            u[i] = cur
+            u[i] = -cur  # replay 'Steer' values have the opposite sign to SteerLeft/SteerRight: this makes + = right, as for keyboard presses
         analog = any(min(abs(v), abs(abs(v) - 1.0)) > 0.02 for _, v in steer)
         return np.clip(u, -1.0, 1.0), "analog" if analog else "digital"
     left = _timeline(control_entries, "SteerLeft", race_start_ms, n)
