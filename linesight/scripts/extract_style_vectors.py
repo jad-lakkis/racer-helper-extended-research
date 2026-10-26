@@ -221,6 +221,8 @@ def analyse_lap(path: Path, track: str, cl: Centerline, corners: list, half_widt
     p = np.maximum.accumulate(p)
     if p[-1] < 0.9 * cl.s[-1]:
         return None, None, f"lap covers only {p[-1] / cl.s[-1]:.0%} of the centerline"
+    if np.median(np.abs(e)) > 0.6 * half_width:
+        return None, None, "driven line far from the centerline (different version of the track?)"
 
     n10 = race_time_ms // PERIOD_MS + 1
     t10 = np.arange(n10) * PERIOD_MS / 1000.0
