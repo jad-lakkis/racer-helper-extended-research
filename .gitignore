@@ -13,3 +13,7 @@ __pycache__/
 
 # Derived per-lap profiles from extract_style_vectors.py (regenerable)
 style_vectors/*/profiles/
+
+# .NET build output
+**/bin/
+**/obj/

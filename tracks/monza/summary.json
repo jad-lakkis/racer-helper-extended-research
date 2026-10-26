@@ -1,0 +1,29 @@
+{
+  "points": 11594,
+  "lap_length_m": 5796.6,
+  "width_m": {
+    "median": 10.2,
+    "p5": 10.2,
+    "p95": 12.3
+  },
+  "elevation_m": {
+    "min": 188.7,
+    "max": 202.9,
+    "range": 14.2
+  },
+  "road_items": [
+    "Items/italie/monza1.Item.Gbx",
+    "Items/italie/monza2.Item.Gbx",
+    "Items/italie/monza3.Item.Gbx",
+    "Items/italie/monza4.Item.Gbx",
+    "Items/italie/monza5.Item.Gbx",
+    "Items/italie/monza6.Item.Gbx",
+    "Items/italie/monza7.Item.Gbx",
+    "Items/italie/monza8.Item.Gbx",
+    "Items/italie/monza9.Item.Gbx"
+  ],
+  "start": [
+    47.9,
+    214.3
+  ]
+}
